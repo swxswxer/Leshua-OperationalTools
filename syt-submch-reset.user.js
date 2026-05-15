@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         收银通重置子商户号工具脚本
 // @namespace    https://om.leshuazf.com/
-// @version      0.0.7
+// @version      0.0.8
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -860,7 +860,7 @@
       #om-auto-report-panel {
         position: fixed;
         right: 18px;
-        bottom: 18px;
+        bottom: 82px;
         z-index: 2147483647;
         font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
