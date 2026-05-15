@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         收银通重置子商户号工具脚本
 // @namespace    https://om.leshuazf.com/
-// @version      0.0.4
+// @version      0.0.5
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -9,6 +9,7 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
 // @connect      gitee.com
+// @connect      raw.giteeusercontent.com
 // @run-at       document-end
 // @updateURL    https://gitee.com/swxswxer1/submch-reset/raw/master/syt-submch-reset.user.js
 // @downloadURL  https://gitee.com/swxswxer1/submch-reset/raw/master/syt-submch-reset.user.js
