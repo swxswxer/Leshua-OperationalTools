@@ -1,11 +1,13 @@
 // ==UserScript==
-// @name         收银通充值重置子商户号脚本
+// @name         收银通重置子商户号工具脚本
 // @namespace    https://om.leshuazf.com/
-// @version      0.0.3
-// @description  自动执行收银通充值微信/支付宝子商户号上报、轮询确认启用、禁用旧号，并输出新上报子商户号。
+// @version      0.0.4
+// @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号
 // @author       swx
 // @match        https://om.leshuazf.com/*
 // @grant        unsafeWindow
+// @grant        GM_xmlhttpRequest
+// @connect      gitee.com
 // @run-at       document-end
 // @updateURL    https://gitee.com/swxswxer1/submch-reset/raw/master/syt-submch-reset.user.js
 // @downloadURL  https://gitee.com/swxswxer1/submch-reset/raw/master/syt-submch-reset.user.js
@@ -19,13 +21,9 @@
   const SAAS = `${ORIGIN}/saasadmin`;
   const BUSINESS_NAME = '收银通';
   const USER_NAME_SELECTOR = 'body > div.panel.layout-panel.layout-panel-north.layout-split-north > div > span.head > span';
-  const USER_WHITELIST = new Set([
-    '段春艳',
-    '黄贤海',
-    '丘惠珊',
-    '蒋鹏',
-    '聂曦',
-  ]);
+  const WHITELIST_URL = 'https://gitee.com/swxswxer1/submch-reset/raw/master/syt-whitelist.json';
+  let whitelistCache = null;
+  let whitelistPromise = null;
   const STATUS = {
     UNNOTIFIED: '未通知',
     DISABLED: '禁用',
@@ -112,16 +110,74 @@
     return match ? match[1] : '';
   }
 
-  function assertCurrentUserAllowed() {
+  function requestText(url) {
+    return new Promise((resolve, reject) => {
+      if (typeof GM_xmlhttpRequest === 'function') {
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url,
+          headers: {
+            Accept: 'application/json,text/plain,*/*',
+          },
+          onload: (response) => {
+            if (response.status >= 200 && response.status < 300) {
+              resolve(response.responseText || '');
+              return;
+            }
+            reject(new Error(`HTTP ${response.status}`));
+          },
+          onerror: () => reject(new Error('网络请求失败')),
+          ontimeout: () => reject(new Error('网络请求超时')),
+        });
+        return;
+      }
+
+      getPageFetch()(url, {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'omit',
+      }).then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.text();
+      }).then(resolve).catch(reject);
+    });
+  }
+
+  function parseWhitelist(text) {
+    const data = JSON.parse(text);
+    if (!Array.isArray(data)) {
+      throw new Error('白名单文件必须是 JSON 数组');
+    }
+    return new Set(data.map((item) => normalizeText(item)).filter(Boolean));
+  }
+
+  async function getWhitelist() {
+    if (whitelistCache) return whitelistCache;
+    if (!whitelistPromise) {
+      whitelistPromise = requestText(WHITELIST_URL).then(parseWhitelist);
+    }
+    try {
+      whitelistCache = await whitelistPromise;
+      return whitelistCache;
+    } catch (error) {
+      whitelistPromise = null;
+      throw new Error(`读取${BUSINESS_NAME}白名单失败: ${error.message}`);
+    }
+  }
+
+  async function assertCurrentUserAllowed() {
     const userName = getLoginUserName();
     if (!userName) {
       throw new Error('无法识别当前登录用户，请在运营后台主页面加载完成后再试');
     }
-    if (!USER_WHITELIST.has(userName)) {
+    const whitelist = await getWhitelist();
+    if (!whitelist.has(userName)) {
       throw new Error(`当前用户 ${userName} 不在${BUSINESS_NAME}白名单内，禁止重置子商户号`);
     }
     return userName;
   }
+
+  getWhitelist().catch(() => undefined);
 
   function buildFormBody(params) {
     const body = new URLSearchParams();
@@ -674,7 +730,7 @@
       if (options.onLog) options.onLog(message, logs.slice());
     };
 
-    const userName = assertCurrentUserAllowed();
+    const userName = await assertCurrentUserAllowed();
     log(`当前用户 ${userName} 已通过${BUSINESS_NAME}白名单校验`);
     log(`开始微信上报商户 ${merchantId}`);
     const report = await submitWechatReport(merchantId, options);
@@ -720,7 +776,7 @@
       if (options.onLog) options.onLog(message, logs.slice());
     };
 
-    const userName = assertCurrentUserAllowed();
+    const userName = await assertCurrentUserAllowed();
     log(`当前用户 ${userName} 已通过${BUSINESS_NAME}白名单校验`);
     log(`开始支付宝上报商户 ${merchantId}`);
     const report = await submitAlipayReport(merchantId, options);
@@ -941,10 +997,10 @@
     panel.id = 'om-auto-report-panel';
     panel.className = 'collapsed';
     panel.innerHTML = `
-      <button class="float-ball" type="button" title="打开收银通充值子商户号自动重置">重置</button>
+      <button class="float-ball" type="button" title="打开收银通重置子商户号工具">重置</button>
       <div class="panel-window">
         <header>
-          <span>收银通充值子商户号重置</span>
+          <span>收银通重置子商户号工具</span>
           <button class="close" type="button" title="收起">x</button>
         </header>
         <div class="body">

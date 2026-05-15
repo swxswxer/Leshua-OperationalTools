@@ -57,6 +57,15 @@ https://gitee.com/swxswxer1/submch-reset/blob/master/lhsd-submch-reset.user.js
 2. 提交并推送到 Gitee。
 3. 用户 Tampermonkey 会按更新周期检查，也可以手动检查用户脚本更新。
 
+## 白名单
+
+脚本执行重置前会读取 Gitee 仓库中的白名单文件：
+
+- 联合收单：`lhsd-whitelist.json`
+- 收银通：`syt-whitelist.json`
+
+以后只需要修改对应 JSON 文件并推送到 Gitee，就可以调整允许执行重置的用户；脚本取不到白名单时会禁止执行。
+
 ## 控制台函数
 
 ```js
@@ -70,4 +79,3 @@ await omAutoReport.allAutoReport('9550117355')
 ```js
 await omAutoReport.autoReport('9550117355')
 ```
-
