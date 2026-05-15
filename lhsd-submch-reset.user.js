@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         联合收单重置子商户号脚本工具
 // @namespace    https://om.leshuazf.com/
-// @version      0.0.6
+// @version      0.0.7
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号。
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -112,7 +112,7 @@
     return match ? match[1] : '';
   }
 
-  function requestText(url) {
+  function requestWhitelistText(url) {
     return new Promise((resolve, reject) => {
       const requestUrl = `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
       const request = typeof GM_xmlhttpRequest === 'function'
@@ -154,7 +154,7 @@
   async function getWhitelist() {
     if (whitelistCache) return whitelistCache;
     if (!whitelistPromise) {
-      whitelistPromise = requestText(WHITELIST_URL).then(parseWhitelist);
+      whitelistPromise = requestWhitelistText(WHITELIST_URL).then(parseWhitelist);
     }
     try {
       whitelistCache = await whitelistPromise;
