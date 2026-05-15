@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         收银通重置子商户号工具脚本
 // @namespace    https://om.leshuazf.com/
-// @version      0.0.11
+// @version      0.0.13
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -973,6 +973,10 @@
         background: #f9fafb;
         border: 1px solid #e5e7eb;
       }
+      #syt-auto-report-panel .log-line.error {
+        color: #dc2626;
+        font-weight: 700;
+      }
       #syt-auto-report-panel .actions {
         display: grid;
         grid-template-columns: 1fr;
@@ -992,11 +996,42 @@
       }
       #syt-auto-report-panel .copy-actions {
         display: flex;
-        justify-content: flex-end;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
         margin-top: 8px;
       }
       #syt-auto-report-panel .copy-actions button {
         min-width: 96px;
+      }
+      #syt-auto-report-panel .notice-tip {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        height: 30px;
+        color: #1d4ed8;
+        font-weight: 700;
+        cursor: help;
+      }
+      #syt-auto-report-panel .notice-tip::after {
+        content: attr(data-tip);
+        position: absolute;
+        left: 0;
+        bottom: 34px;
+        display: none;
+        width: 300px;
+        padding: 8px 10px;
+        color: #111827;
+        background: #fff;
+        border: 1px solid #c7d2fe;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, .18);
+        white-space: pre-line;
+        word-break: break-word;
+        line-height: 1.5;
+        z-index: 1;
+      }
+      #syt-auto-report-panel .notice-tip:hover::after {
+        display: block;
       }
       #syt-auto-report-panel .result-label {
         margin-top: 10px;
@@ -1046,6 +1081,7 @@
             <input id="om-auto-report-alipay-result" type="text" readonly placeholder="执行成功后显示">
           </div>
           <div class="copy-actions">
+            <span class="notice-tip" data-tip="微信默认上报渠道号：209096974深圳市前海扫扫科技有限公司&#10;支付宝默认上报渠道号：2088621549599695乐刷支付科技有限公司&#10;暂不支持修改">注意事项</span>
             <button id="om-auto-report-copy" type="button" disabled>复制</button>
           </div>
           <pre id="om-auto-report-log"></pre>
@@ -1072,9 +1108,12 @@
     const pageMerchantInput = document.querySelector('input[name="merchantId"], #merchantId');
     if (pageMerchantInput && pageMerchantInput.value) input.value = pageMerchantInput.value.trim();
 
-    const appendLog = (line) => {
+    const appendLog = (line, isError = false) => {
       const time = formatDateTime(new Date());
-      logBox.textContent += `\n[${time}] ${line}`;
+      const row = document.createElement('div');
+      row.className = isError || /失败|错误|异常/.test(line) ? 'log-line error' : 'log-line';
+      row.textContent = `[${time}] ${line}`;
+      logBox.appendChild(row);
       logBox.scrollTop = logBox.scrollHeight;
     };
     const setBusy = (busy) => {
@@ -1085,7 +1124,9 @@
     const getCopyText = () => {
       const wechatValue = resultInput.value.trim();
       const alipayValue = alipayResultInput.value.trim();
+      if (!wechatValue && !alipayValue) return '';
       return [
+        `乐刷商户号：${input.value.trim()}`,
         wechatValue ? `微信：${wechatValue}` : '',
         alipayValue ? `支付宝：${alipayValue}` : '',
       ].filter(Boolean).join('\n');
@@ -1101,7 +1142,7 @@
 
     wechatButton.addEventListener('click', async () => {
       setBusy(true);
-      logBox.textContent = '';
+      logBox.innerHTML = '';
       resetResultOutputs();
       try {
         const result = await autoReport(input.value.trim(), { onLog: appendLog });
@@ -1111,7 +1152,7 @@
         appendLog(`新上报微信子商户号: ${newReportedId || '无'}`);
         console.log('omAutoReport result:', result);
       } catch (error) {
-        appendLog(`失败: ${error.message}`);
+        appendLog(`失败: ${error.message}`, true);
         console.error(error);
       } finally {
         setBusy(false);
@@ -1120,7 +1161,7 @@
 
     alipayButton.addEventListener('click', async () => {
       setBusy(true);
-      logBox.textContent = '';
+      logBox.innerHTML = '';
       resetResultOutputs();
       try {
         const result = await alipayAutoReport(input.value.trim(), { onLog: appendLog });
@@ -1130,7 +1171,7 @@
         appendLog(`新上报支付宝子商户号: ${newReportedId || '无'}`);
         console.log('omAutoReport alipay result:', result);
       } catch (error) {
-        appendLog(`失败: ${error.message}`);
+        appendLog(`失败: ${error.message}`, true);
         console.error(error);
       } finally {
         setBusy(false);
@@ -1139,7 +1180,7 @@
 
     allButton.addEventListener('click', async () => {
       setBusy(true);
-      logBox.textContent = '';
+      logBox.innerHTML = '';
       resetResultOutputs();
       try {
         const merchantId = input.value.trim();
@@ -1156,7 +1197,7 @@
         appendLog(`新上报支付宝子商户号: ${newZfbSubMchId || '无'}`);
         console.log('omAutoReport all result:', { wechatResult, alipayResult });
       } catch (error) {
-        appendLog(`失败: ${error.message}`);
+        appendLog(`失败: ${error.message}`, true);
         console.error(error);
       } finally {
         setBusy(false);
@@ -1164,7 +1205,7 @@
     });
 
     clearButton.addEventListener('click', () => {
-      logBox.textContent = '';
+      logBox.innerHTML = '';
       resetResultOutputs();
     });
     copyButton.addEventListener('click', async () => {
@@ -1174,7 +1215,7 @@
         await copyText(text);
         appendLog('已复制新上报子商户号');
       } catch (error) {
-        appendLog(`复制失败: ${error.message}`);
+        appendLog(`复制失败: ${error.message}`, true);
       }
     });
     floatBall.addEventListener('click', () => {

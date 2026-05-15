@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         联合收单重置子商户号脚本工具
 // @namespace    https://om.leshuazf.com/
-// @version      0.0.9
+// @version      0.0.10
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号。
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -974,6 +974,10 @@
         background: #f9fafb;
         border: 1px solid #e5e7eb;
       }
+      #lhsd-auto-report-panel .log-line.error {
+        color: #dc2626;
+        font-weight: 700;
+      }
       #lhsd-auto-report-panel .actions {
         display: grid;
         grid-template-columns: 1fr;
@@ -1073,9 +1077,12 @@
     const pageMerchantInput = document.querySelector('input[name="merchantId"], #merchantId');
     if (pageMerchantInput && pageMerchantInput.value) input.value = pageMerchantInput.value.trim();
 
-    const appendLog = (line) => {
+    const appendLog = (line, isError = false) => {
       const time = formatDateTime(new Date());
-      logBox.textContent += `\n[${time}] ${line}`;
+      const row = document.createElement('div');
+      row.className = isError || /失败|错误|异常/.test(line) ? 'log-line error' : 'log-line';
+      row.textContent = `[${time}] ${line}`;
+      logBox.appendChild(row);
       logBox.scrollTop = logBox.scrollHeight;
     };
     const setBusy = (busy) => {
@@ -1086,7 +1093,9 @@
     const getCopyText = () => {
       const wechatValue = resultInput.value.trim();
       const alipayValue = alipayResultInput.value.trim();
+      if (!wechatValue && !alipayValue) return '';
       return [
+        `乐刷商户号：${input.value.trim()}`,
         wechatValue ? `微信：${wechatValue}` : '',
         alipayValue ? `支付宝：${alipayValue}` : '',
       ].filter(Boolean).join('\n');
@@ -1102,7 +1111,7 @@
 
     wechatButton.addEventListener('click', async () => {
       setBusy(true);
-      logBox.textContent = '';
+      logBox.innerHTML = '';
       resetResultOutputs();
       try {
         const result = await autoReport(input.value.trim(), { onLog: appendLog });
@@ -1112,7 +1121,7 @@
         appendLog(`新上报微信子商户号: ${newReportedId || '无'}`);
         console.log('omAutoReport result:', result);
       } catch (error) {
-        appendLog(`失败: ${error.message}`);
+        appendLog(`失败: ${error.message}`, true);
         console.error(error);
       } finally {
         setBusy(false);
@@ -1121,7 +1130,7 @@
 
     alipayButton.addEventListener('click', async () => {
       setBusy(true);
-      logBox.textContent = '';
+      logBox.innerHTML = '';
       resetResultOutputs();
       try {
         const result = await alipayAutoReport(input.value.trim(), { onLog: appendLog });
@@ -1131,7 +1140,7 @@
         appendLog(`新上报支付宝子商户号: ${newReportedId || '无'}`);
         console.log('omAutoReport alipay result:', result);
       } catch (error) {
-        appendLog(`失败: ${error.message}`);
+        appendLog(`失败: ${error.message}`, true);
         console.error(error);
       } finally {
         setBusy(false);
@@ -1140,7 +1149,7 @@
 
     allButton.addEventListener('click', async () => {
       setBusy(true);
-      logBox.textContent = '';
+      logBox.innerHTML = '';
       resetResultOutputs();
       try {
         const merchantId = input.value.trim();
@@ -1157,7 +1166,7 @@
         appendLog(`新上报支付宝子商户号: ${newZfbSubMchId || '无'}`);
         console.log('omAutoReport all result:', { wechatResult, alipayResult });
       } catch (error) {
-        appendLog(`失败: ${error.message}`);
+        appendLog(`失败: ${error.message}`, true);
         console.error(error);
       } finally {
         setBusy(false);
@@ -1165,7 +1174,7 @@
     });
 
     clearButton.addEventListener('click', () => {
-      logBox.textContent = '';
+      logBox.innerHTML = '';
       resetResultOutputs();
     });
     copyButton.addEventListener('click', async () => {
@@ -1175,7 +1184,7 @@
         await copyText(text);
         appendLog('已复制新上报子商户号');
       } catch (error) {
-        appendLog(`复制失败: ${error.message}`);
+        appendLog(`复制失败: ${error.message}`, true);
       }
     });
     floatBall.addEventListener('click', () => {
