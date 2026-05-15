@@ -529,9 +529,9 @@
 
       const channelKeys = snapshots.map((item) => getRowChannelKey(item.unnotifiedRows));
       if (
-        snapshots.length === 3
-        && channelKeys[0]
-        && channelKeys.every((channelKey) => channelKey === channelKeys[0])
+          snapshots.length === 3
+          && channelKeys[0]
+          && channelKeys.every((channelKey) => channelKey === channelKeys[0])
       ) {
         const lastSnapshot = snapshots[snapshots.length - 1];
         return {
@@ -662,8 +662,8 @@
       ...options,
       onGroup: (group) => {
         const paramsText = Object.entries(group.statusParams)
-          .map(([key, value]) => `${key}=${value}`)
-          .join('&');
+            .map(([key, value]) => `${key}=${value}`)
+            .join('&');
         log(`启用新微信子商户号 ${group.wxSubMchId}: ${paramsText}`);
       },
     });
@@ -674,8 +674,8 @@
       ...options,
       onGroup: (group) => {
         const paramsText = Object.entries(group.statusParams)
-          .map(([key, value]) => `${key}=${value}`)
-          .join('&');
+            .map(([key, value]) => `${key}=${value}`)
+            .join('&');
         log(`禁用旧微信子商户号 ${group.wxSubMchId}: ${paramsText}`);
       },
     });
@@ -718,8 +718,8 @@
       ...options,
       onGroup: (group) => {
         const paramsText = Object.entries(group.statusParams)
-          .map(([key, value]) => `${key}=${value}`)
-          .join('&');
+            .map(([key, value]) => `${key}=${value}`)
+            .join('&');
         log(`禁用旧支付宝子商户号 ${group.zfbSubMchId || group.subMchId}: ${paramsText}`);
       },
     });
