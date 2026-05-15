@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         收银通重置子商户号工具脚本
 // @namespace    https://om.leshuazf.com/
-// @version      0.0.5
+// @version      0.0.6
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -23,7 +23,7 @@
   const SAAS = `${ORIGIN}/saasadmin`;
   const BUSINESS_NAME = '收银通';
   const USER_NAME_SELECTOR = 'body > div.panel.layout-panel.layout-panel-north.layout-split-north > div > span.head > span';
-  const WHITELIST_URL = 'https://gitee.com/swxswxer1/submch-reset/raw/master/syt-whitelist.json';
+  const WHITELIST_URL = 'https://raw.giteeusercontent.com/swxswxer1/submch-reset/raw/master/syt-whitelist.json';
   let whitelistCache = null;
   let whitelistPromise = null;
   const STATUS = {
@@ -114,6 +114,7 @@
 
   function requestText(url) {
     return new Promise((resolve, reject) => {
+      const requestUrl = `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
       const request = typeof GM_xmlhttpRequest === 'function'
         ? GM_xmlhttpRequest
         : (typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function' ? GM.xmlHttpRequest : null);
@@ -121,7 +122,7 @@
       if (request) {
         request({
           method: 'GET',
-          url,
+          url: requestUrl,
           headers: {
             Accept: 'application/json,text/plain,*/*',
           },
