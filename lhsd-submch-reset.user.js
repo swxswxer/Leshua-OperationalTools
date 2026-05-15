@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         联合收单重置子商户号脚本工具
 // @namespace    https://om.leshuazf.com/
-// @version      0.0.7
+// @version      0.0.8
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号。
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -879,19 +879,19 @@
   }
 
   function createPanel() {
-    if (document.getElementById('om-auto-report-panel')) return;
+    if (document.getElementById('lhsd-auto-report-panel')) return;
 
     const style = document.createElement('style');
     style.textContent = `
-      #om-auto-report-panel {
+      #lhsd-auto-report-panel {
         position: fixed;
         right: 18px;
         bottom: 18px;
         z-index: 2147483647;
         font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
-      #om-auto-report-panel * { box-sizing: border-box; }
-      #om-auto-report-panel .float-ball {
+      #lhsd-auto-report-panel * { box-sizing: border-box; }
+      #lhsd-auto-report-panel .float-ball {
         display: none;
         width: 52px;
         height: 52px;
@@ -904,22 +904,22 @@
         font-weight: 700;
         line-height: 1.15;
       }
-      #om-auto-report-panel.collapsed .float-ball {
+      #lhsd-auto-report-panel.collapsed .float-ball {
         display: flex;
         align-items: center;
         justify-content: center;
       }
-      #om-auto-report-panel .panel-window {
+      #lhsd-auto-report-panel .panel-window {
         width: 360px;
         color: #1f2937;
         background: #fff;
         border: 1px solid #d1d5db;
         box-shadow: 0 12px 32px rgba(15, 23, 42, .18);
       }
-      #om-auto-report-panel.collapsed .panel-window {
+      #lhsd-auto-report-panel.collapsed .panel-window {
         display: none;
       }
-      #om-auto-report-panel .panel-window header {
+      #lhsd-auto-report-panel .panel-window header {
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -928,21 +928,21 @@
         background: #1f6feb;
         font-weight: 700;
       }
-      #om-auto-report-panel button {
+      #lhsd-auto-report-panel button {
         height: 30px;
         border: 1px solid #c7d2fe;
         background: #eff6ff;
         color: #1d4ed8;
         cursor: pointer;
       }
-      #om-auto-report-panel button:disabled {
+      #lhsd-auto-report-panel button:disabled {
         cursor: not-allowed;
         color: #6b7280;
         background: #f3f4f6;
         border-color: #d1d5db;
       }
-      #om-auto-report-panel .body { padding: 12px; }
-      #om-auto-report-panel input {
+      #lhsd-auto-report-panel .body { padding: 12px; }
+      #lhsd-auto-report-panel input {
         min-width: 0;
         width: 100%;
         height: 30px;
@@ -959,12 +959,12 @@
         -webkit-font-smoothing: antialiased;
         filter: none;
       }
-      #om-auto-report-panel input::placeholder {
+      #lhsd-auto-report-panel input::placeholder {
         color: #6b7280;
         opacity: 1;
         text-shadow: none;
       }
-      #om-auto-report-panel pre {
+      #lhsd-auto-report-panel pre {
         height: 168px;
         margin: 10px 0 0;
         padding: 8px;
@@ -974,41 +974,41 @@
         background: #f9fafb;
         border: 1px solid #e5e7eb;
       }
-      #om-auto-report-panel .actions {
+      #lhsd-auto-report-panel .actions {
         display: grid;
         grid-template-columns: 1fr;
         gap: 8px;
         margin-top: 8px;
       }
-      #om-auto-report-panel .log-actions {
+      #lhsd-auto-report-panel .log-actions {
         display: flex;
         justify-content: flex-end;
         margin-top: 8px;
       }
-      #om-auto-report-panel .log-actions button {
+      #lhsd-auto-report-panel .log-actions button {
         min-width: 96px;
       }
-      #om-auto-report-panel .result-row {
+      #lhsd-auto-report-panel .result-row {
         margin-top: 8px;
       }
-      #om-auto-report-panel .copy-actions {
+      #lhsd-auto-report-panel .copy-actions {
         display: flex;
         justify-content: flex-end;
         margin-top: 8px;
       }
-      #om-auto-report-panel .copy-actions button {
+      #lhsd-auto-report-panel .copy-actions button {
         min-width: 96px;
       }
-      #om-auto-report-panel .result-label {
+      #lhsd-auto-report-panel .result-label {
         margin-top: 10px;
         color: #374151;
         font-weight: 700;
       }
-      #om-auto-report-panel #om-auto-report-result {
+      #lhsd-auto-report-panel #om-auto-report-result {
         background: #fff;
         color: #111827;
       }
-      #om-auto-report-panel .close {
+      #lhsd-auto-report-panel .close {
         width: 24px;
         height: 24px;
         padding: 0;
@@ -1020,7 +1020,7 @@
     document.head.appendChild(style);
 
     const panel = document.createElement('div');
-    panel.id = 'om-auto-report-panel';
+    panel.id = 'lhsd-auto-report-panel';
     panel.className = 'collapsed';
     panel.innerHTML = `
       <button class="float-ball" type="button" title="打开子商户号自动重置">重置</button>
@@ -1231,8 +1231,10 @@
     getDefaultRange,
   };
 
+  window.lhsdAutoReport = api;
   window.omAutoReport = api;
   if (typeof unsafeWindow !== 'undefined') {
+    unsafeWindow.lhsdAutoReport = api;
     unsafeWindow.omAutoReport = api;
   }
 
