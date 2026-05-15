@@ -234,78 +234,8 @@ await sytAutoReport.autoReport('9550117355')
 | `syt-whitelist.json` | 收银通远程白名单 |
 | `README.md` | 项目说明和维护入口 |
 
-## 发布流程
-
-1. 修改脚本或白名单。
-2. 如果修改脚本逻辑，更新对应脚本头部 `@version`。
-3. 本地检查语法：
-
-```bash
-node --check lhsd-submch-reset.user.js
-node --check syt-submch-reset.user.js
-```
-
-4. 提交并推送：
-
-```bash
-git add README.md lhsd-submch-reset.user.js syt-submch-reset.user.js lhsd-whitelist.json syt-whitelist.json
-git commit -m "说明本次修改"
-git push origin master
-```
 
 5. 在 Tampermonkey 中手动检查更新，确认脚本版本已变更。
 
 如果只是修改白名单 JSON，不需要改脚本版本；白名单读取时带时间戳参数，会尽量避免缓存影响。
 
-## 常见问题
-
-### 只显示一个悬浮球
-
-检查两个脚本是否都更新到支持独立容器 id 的版本：
-
-- 联合收单 `0.0.8+`
-- 收银通 `0.0.9+`
-
-旧版本两个脚本都使用 `om-auto-report-panel`，会互相覆盖。
-
-### 白名单读取失败
-
-重点检查：
-
-- Tampermonkey 是否已更新到包含 `@connect raw.giteeusercontent.com` 的版本。
-- 白名单 URL 是否能直接打开。
-- 白名单文件是否是合法 JSON 数组。
-- 脚本是否使用 `requestWhitelistText` 读取白名单，避免被后台接口的 `requestText` 覆盖。
-
-### 控制台对象不对
-
-两个脚本同时安装时，不要依赖 `omAutoReport`。请使用：
-
-- `lhsdAutoReport`
-- `sytAutoReport`
-
-### 推送失败：SSH agent 没有 key
-
-如果出现：
-
-```text
-sign_and_send_pubkey: signing failed
-Permission denied (publickey)
-```
-
-先加载 SSH key：
-
-```bash
-ssh-add ~/.ssh/id_rsa
-git push origin master
-```
-
-### 不要提交本地 IDE 文件
-
-`.gitignore` 已忽略 `.idea/` 和 `.DS_Store`。提交前用：
-
-```bash
-git status --short
-```
-
-确认没有无关文件。
