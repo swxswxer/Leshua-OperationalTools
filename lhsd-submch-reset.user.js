@@ -7,6 +7,7 @@
 // @match        https://om.leshuazf.com/*
 // @grant        unsafeWindow
 // @grant        GM_xmlhttpRequest
+// @grant        GM.xmlHttpRequest
 // @connect      gitee.com
 // @run-at       document-end
 // @updateURL    https://gitee.com/swxswxer1/submch-reset/raw/master/lhsd-submch-reset.user.js
@@ -112,8 +113,12 @@
 
   function requestText(url) {
     return new Promise((resolve, reject) => {
-      if (typeof GM_xmlhttpRequest === 'function') {
-        GM_xmlhttpRequest({
+      const request = typeof GM_xmlhttpRequest === 'function'
+        ? GM_xmlhttpRequest
+        : (typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function' ? GM.xmlHttpRequest : null);
+
+      if (request) {
+        request({
           method: 'GET',
           url,
           headers: {
@@ -132,14 +137,7 @@
         return;
       }
 
-      getPageFetch()(url, {
-        method: 'GET',
-        cache: 'no-store',
-        credentials: 'omit',
-      }).then((response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.text();
-      }).then(resolve).catch(reject);
+      reject(new Error('油猴跨域请求能力不可用，请更新或重新安装脚本并允许 gitee.com 访问权限'));
     });
   }
 
