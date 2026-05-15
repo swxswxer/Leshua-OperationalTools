@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         收银通重置子商户号工具脚本
 // @namespace    https://om.leshuazf.com/
-// @version      0.0.9
+// @version      0.0.10
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -261,6 +261,17 @@
     }
   }
 
+  function getReportDataObject(response) {
+    return response && response.data && typeof response.data === 'object' ? response.data : {};
+  }
+
+  function assertReportBusinessSuccess(response, label) {
+    const reportData = getReportDataObject(response);
+    if (reportData.result != null && Number(reportData.result) !== 0) {
+      throw new Error(`${label}上报失败: ${reportData.msg || response.respMsg || JSON.stringify(response)}`);
+    }
+  }
+
   async function submitWechatReport(merchantId, options = {}) {
     assertMerchantId(merchantId);
     const params = new URLSearchParams({
@@ -282,10 +293,17 @@
     if (Number(data.respCode) !== 0) {
       throw new Error(`上报失败: ${data.respMsg || JSON.stringify(data)}`);
     }
-    if (!/^\d+$/.test(String(data.data || ''))) {
+    assertReportBusinessSuccess(data, '微信');
+    const wxMchId = normalizeText(getReportDataObject(data).wxMchId || data.wxMchId || data.data);
+    if (!/^\d+$/.test(wxMchId)) {
       throw new Error(`上报接口未返回微信子商户号: ${JSON.stringify(data)}`);
     }
-    return data;
+    return {
+      ...data,
+      rawData: data.data,
+      data: wxMchId,
+      wxMchId,
+    };
   }
 
   const reportMerchant = submitWechatReport;
@@ -310,10 +328,17 @@
     if (Number(data.respCode) !== 0) {
       throw new Error(`支付宝上报失败: ${data.respMsg || JSON.stringify(data)}`);
     }
-    if (!/^\d+$/.test(String(data.data || ''))) {
+    assertReportBusinessSuccess(data, '支付宝');
+    const zfbSubMch = normalizeText(getReportDataObject(data).zfbSubMch || data.zfbSubMch || data.data);
+    if (!/^\d+$/.test(zfbSubMch)) {
       throw new Error(`支付宝上报接口未返回支付宝子商户号: ${JSON.stringify(data)}`);
     }
-    return data;
+    return {
+      ...data,
+      rawData: data.data,
+      data: zfbSubMch,
+      zfbSubMch,
+    };
   }
 
   async function queryWechatMappings(merchantId, options = {}) {
