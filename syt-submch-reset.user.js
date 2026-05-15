@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         收银通充值重置子商户号脚本
 // @namespace    https://om.leshuazf.com/
-// @version      0.0.2
+// @version      0.0.3
 // @description  自动执行收银通充值微信/支付宝子商户号上报、轮询确认启用、禁用旧号，并输出新上报子商户号。
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -17,6 +17,15 @@
 
   const ORIGIN = 'https://om.leshuazf.com';
   const SAAS = `${ORIGIN}/saasadmin`;
+  const BUSINESS_NAME = '收银通';
+  const USER_NAME_SELECTOR = 'body > div.panel.layout-panel.layout-panel-north.layout-split-north > div > span.head > span';
+  const USER_WHITELIST = new Set([
+    '段春艳',
+    '黄贤海',
+    '丘惠珊',
+    '蒋鹏',
+    '聂曦',
+  ]);
   const STATUS = {
     UNNOTIFIED: '未通知',
     DISABLED: '禁用',
@@ -81,6 +90,37 @@
 
   function normalizeText(text) {
     return String(text || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function getLoginUserText() {
+    const localNode = document.querySelector(USER_NAME_SELECTOR);
+    if (localNode) return normalizeText(localNode.textContent);
+
+    try {
+      const topNode = window.top && window.top.document.querySelector(USER_NAME_SELECTOR);
+      if (topNode) return normalizeText(topNode.textContent);
+    } catch (error) {
+      return '';
+    }
+
+    return '';
+  }
+
+  function getLoginUserName() {
+    const text = getLoginUserText();
+    const match = text.match(/欢迎\s*([^（(\s]+)\s*[（(]/);
+    return match ? match[1] : '';
+  }
+
+  function assertCurrentUserAllowed() {
+    const userName = getLoginUserName();
+    if (!userName) {
+      throw new Error('无法识别当前登录用户，请在运营后台主页面加载完成后再试');
+    }
+    if (!USER_WHITELIST.has(userName)) {
+      throw new Error(`当前用户 ${userName} 不在${BUSINESS_NAME}白名单内，禁止重置子商户号`);
+    }
+    return userName;
   }
 
   function buildFormBody(params) {
@@ -634,6 +674,8 @@
       if (options.onLog) options.onLog(message, logs.slice());
     };
 
+    const userName = assertCurrentUserAllowed();
+    log(`当前用户 ${userName} 已通过${BUSINESS_NAME}白名单校验`);
     log(`开始微信上报商户 ${merchantId}`);
     const report = await submitWechatReport(merchantId, options);
     const newWxSubMchId = String(report.data);
@@ -678,6 +720,8 @@
       if (options.onLog) options.onLog(message, logs.slice());
     };
 
+    const userName = assertCurrentUserAllowed();
+    log(`当前用户 ${userName} 已通过${BUSINESS_NAME}白名单校验`);
     log(`开始支付宝上报商户 ${merchantId}`);
     const report = await submitAlipayReport(merchantId, options);
     const newZfbSubMchId = String(report.data);
