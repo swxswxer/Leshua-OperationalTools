@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         联合收单重置子商户号脚本工具
 // @namespace    https://om.leshuazf.com/
-// @version      0.0.8
+// @version      0.0.9
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号。
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -1094,13 +1094,16 @@
     const refreshCopyButton = () => {
       copyButton.disabled = !getCopyText();
     };
+    const resetResultOutputs = () => {
+      resultInput.value = '';
+      alipayResultInput.value = '';
+      refreshCopyButton();
+    };
 
     wechatButton.addEventListener('click', async () => {
       setBusy(true);
       logBox.textContent = '';
-      resultInput.value = '';
-      copyButton.disabled = true;
-      alipayResultInput.value = '';
+      resetResultOutputs();
       try {
         const result = await autoReport(input.value.trim(), { onLog: appendLog });
         const newReportedId = result.newReportedWxSubMchId || '';
@@ -1119,8 +1122,7 @@
     alipayButton.addEventListener('click', async () => {
       setBusy(true);
       logBox.textContent = '';
-      alipayResultInput.value = '';
-      refreshCopyButton();
+      resetResultOutputs();
       try {
         const result = await alipayAutoReport(input.value.trim(), { onLog: appendLog });
         const newReportedId = result.newReportedZfbSubMchId || '';
@@ -1139,9 +1141,7 @@
     allButton.addEventListener('click', async () => {
       setBusy(true);
       logBox.textContent = '';
-      resultInput.value = '';
-      copyButton.disabled = true;
-      alipayResultInput.value = '';
+      resetResultOutputs();
       try {
         const merchantId = input.value.trim();
         const wechatResult = await wechatAutoReport(merchantId, { onLog: appendLog });
@@ -1166,9 +1166,7 @@
 
     clearButton.addEventListener('click', () => {
       logBox.textContent = '';
-      resultInput.value = '';
-      copyButton.disabled = true;
-      alipayResultInput.value = '';
+      resetResultOutputs();
     });
     copyButton.addEventListener('click', async () => {
       const text = getCopyText();
