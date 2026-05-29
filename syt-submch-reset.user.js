@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         收银通重置子商户号工具脚本
 // @namespace    https://om.leshuazf.com/
-// @version      0.0.15
+// @version      0.0.16
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -979,6 +979,11 @@
         gap: 8px;
         margin-top: 8px;
       }
+      #syt-auto-report-panel .channel-label {
+        margin-top: 10px;
+        color: #374151;
+        font-weight: 700;
+      }
       #syt-auto-report-panel pre {
         height: 168px;
         margin: 10px 0 0;
@@ -1083,10 +1088,12 @@
           <div>
             <input id="om-auto-report-merchant" type="text" inputmode="numeric" placeholder="乐刷商户号">
           </div>
+          <div class="channel-label">微信上报渠道号</div>
           <div class="channel-row">
             <input id="om-auto-report-wx-channel-id" type="text" placeholder="微信渠道号（可选）" value="${DEFAULT_WECHAT_CHANNEL_ID}">
             <input id="om-auto-report-wx-channel-name" type="text" placeholder="微信渠道号主体（可选）" value="${DEFAULT_WECHAT_CHANNEL_NAME}">
           </div>
+          <div class="channel-label">支付宝上报渠道号</div>
           <div class="channel-row">
             <input id="om-auto-report-alipay-channel-id" type="text" placeholder="支付宝渠道号（可选）" value="${DEFAULT_ALIPAY_CHANNEL_ID}">
             <input id="om-auto-report-alipay-channel-name" type="text" placeholder="支付宝渠道号主体（可选）" value="${DEFAULT_ALIPAY_CHANNEL_NAME}">
