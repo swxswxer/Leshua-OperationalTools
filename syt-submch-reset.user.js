@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         收银通重置子商户号工具脚本
 // @namespace    https://om.leshuazf.com/
-// @version      0.0.13
+// @version      0.0.15
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -21,6 +21,10 @@
 
   const ORIGIN = 'https://om.leshuazf.com';
   const SAAS = `${ORIGIN}/saasadmin`;
+  const DEFAULT_WECHAT_CHANNEL_ID = '209096974';
+  const DEFAULT_WECHAT_CHANNEL_NAME = '深圳市前海扫扫科技有限公司';
+  const DEFAULT_ALIPAY_CHANNEL_ID = '2088621549599695';
+  const DEFAULT_ALIPAY_CHANNEL_NAME = '乐刷支付科技有限公司';
   const BUSINESS_NAME = '收银通';
   const USER_NAME_SELECTOR = 'body > div.panel.layout-panel.layout-panel-north.layout-split-north > div > span.head > span';
   const WHITELIST_URL = 'https://raw.giteeusercontent.com/swxswxer1/submch-reset/raw/master/syt-whitelist.json';
@@ -272,13 +276,17 @@
     }
   }
 
+  function getOptionValue(options, key, defaultValue) {
+    return Object.prototype.hasOwnProperty.call(options, key) ? String(options[key] == null ? '' : options[key]) : defaultValue;
+  }
+
   async function submitWechatReport(merchantId, options = {}) {
     assertMerchantId(merchantId);
     const params = new URLSearchParams({
       method: 'posreport',
       merchantId,
-      channelId: options.channelId || '209096974',
-      channelName: options.channelName || '深圳市前海扫扫科技有限公司',
+      channelId: getOptionValue(options, 'channelId', DEFAULT_WECHAT_CHANNEL_ID),
+      channelName: getOptionValue(options, 'channelName', DEFAULT_WECHAT_CHANNEL_NAME),
       notice: options.notice == null ? '1' : String(options.notice),
       mchId: options.mchId || '1502075691',
       configType: options.configType == null ? '1' : String(options.configType),
@@ -313,8 +321,8 @@
     const params = new URLSearchParams({
       method: 'posreport',
       merchantId,
-      sourcePid: options.sourcePid || '2088621549599695',
-      sourceName: options.sourceName || '乐刷支付科技有限公司',
+      sourcePid: getOptionValue(options, 'sourcePid', DEFAULT_ALIPAY_CHANNEL_ID),
+      sourceName: getOptionValue(options, 'sourceName', DEFAULT_ALIPAY_CHANNEL_NAME),
       report4M3Flag: options.report4M3Flag == null ? '2' : String(options.report4M3Flag),
       configType: options.configType || '',
       notice: options.notice == null ? '1' : String(options.notice),
@@ -758,6 +766,7 @@
     const userName = await assertCurrentUserAllowed();
     log(`当前用户 ${userName} 已通过${BUSINESS_NAME}白名单校验`);
     log(`开始微信上报商户 ${merchantId}`);
+    log(`微信上报渠道: ${getOptionValue(options, 'channelId', DEFAULT_WECHAT_CHANNEL_ID)} ${getOptionValue(options, 'channelName', DEFAULT_WECHAT_CHANNEL_NAME)}`);
     const report = await submitWechatReport(merchantId, options);
     const newWxSubMchId = String(report.data);
     log(`上报任务已提交，返回微信子商户号: ${newWxSubMchId}`);
@@ -804,6 +813,7 @@
     const userName = await assertCurrentUserAllowed();
     log(`当前用户 ${userName} 已通过${BUSINESS_NAME}白名单校验`);
     log(`开始支付宝上报商户 ${merchantId}`);
+    log(`支付宝上报渠道: ${getOptionValue(options, 'sourcePid', DEFAULT_ALIPAY_CHANNEL_ID)} ${getOptionValue(options, 'sourceName', DEFAULT_ALIPAY_CHANNEL_NAME)}`);
     const report = await submitAlipayReport(merchantId, options);
     const newZfbSubMchId = String(report.data);
     log(`支付宝上报任务已提交，返回支付宝子商户号: ${newZfbSubMchId}`);
@@ -963,6 +973,12 @@
         opacity: 1;
         text-shadow: none;
       }
+      #syt-auto-report-panel .channel-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 8px;
+      }
       #syt-auto-report-panel pre {
         height: 168px;
         margin: 10px 0 0;
@@ -1067,6 +1083,14 @@
           <div>
             <input id="om-auto-report-merchant" type="text" inputmode="numeric" placeholder="乐刷商户号">
           </div>
+          <div class="channel-row">
+            <input id="om-auto-report-wx-channel-id" type="text" placeholder="微信渠道号（可选）" value="${DEFAULT_WECHAT_CHANNEL_ID}">
+            <input id="om-auto-report-wx-channel-name" type="text" placeholder="微信渠道号主体（可选）" value="${DEFAULT_WECHAT_CHANNEL_NAME}">
+          </div>
+          <div class="channel-row">
+            <input id="om-auto-report-alipay-channel-id" type="text" placeholder="支付宝渠道号（可选）" value="${DEFAULT_ALIPAY_CHANNEL_ID}">
+            <input id="om-auto-report-alipay-channel-name" type="text" placeholder="支付宝渠道号主体（可选）" value="${DEFAULT_ALIPAY_CHANNEL_NAME}">
+          </div>
           <div class="actions">
             <button id="om-auto-report-wechat" type="button">微信重置子商户号</button>
             <button id="om-auto-report-alipay" type="button">支付宝重置子商户号</button>
@@ -1081,7 +1105,7 @@
             <input id="om-auto-report-alipay-result" type="text" readonly placeholder="执行成功后显示">
           </div>
           <div class="copy-actions">
-            <span class="notice-tip" data-tip="微信默认上报渠道号：209096974深圳市前海扫扫科技有限公司&#10;支付宝默认上报渠道号：2088621549599695乐刷支付科技有限公司&#10;暂不支持修改">注意事项</span>
+            <span class="notice-tip" data-tip="微信默认上报渠道号：209096974深圳市前海扫扫科技有限公司&#10;支付宝默认上报渠道号：2088621549599695乐刷支付科技有限公司&#10;可在上方输入框修改">注意事项</span>
             <button id="om-auto-report-copy" type="button" disabled>复制</button>
           </div>
           <pre id="om-auto-report-log"></pre>
@@ -1095,6 +1119,10 @@
 
     const floatBall = panel.querySelector('.float-ball');
     const input = panel.querySelector('#om-auto-report-merchant');
+    const wxChannelIdInput = panel.querySelector('#om-auto-report-wx-channel-id');
+    const wxChannelNameInput = panel.querySelector('#om-auto-report-wx-channel-name');
+    const alipayChannelIdInput = panel.querySelector('#om-auto-report-alipay-channel-id');
+    const alipayChannelNameInput = panel.querySelector('#om-auto-report-alipay-channel-name');
     const logBox = panel.querySelector('#om-auto-report-log');
     const wechatButton = panel.querySelector('#om-auto-report-wechat');
     const alipayButton = panel.querySelector('#om-auto-report-alipay');
@@ -1121,6 +1149,14 @@
       alipayButton.disabled = busy;
       allButton.disabled = busy;
     };
+    const getReportOptions = () => {
+      return {
+        channelId: wxChannelIdInput.value.trim(),
+        channelName: wxChannelNameInput.value.trim(),
+        sourcePid: alipayChannelIdInput.value.trim(),
+        sourceName: alipayChannelNameInput.value.trim(),
+      };
+    };
     const getCopyText = () => {
       const wechatValue = resultInput.value.trim();
       const alipayValue = alipayResultInput.value.trim();
@@ -1145,7 +1181,7 @@
       logBox.innerHTML = '';
       resetResultOutputs();
       try {
-        const result = await autoReport(input.value.trim(), { onLog: appendLog });
+        const result = await autoReport(input.value.trim(), { ...getReportOptions(), onLog: appendLog });
         const newReportedId = result.newReportedWxSubMchId || '';
         resultInput.value = newReportedId;
         refreshCopyButton();
@@ -1164,7 +1200,7 @@
       logBox.innerHTML = '';
       resetResultOutputs();
       try {
-        const result = await alipayAutoReport(input.value.trim(), { onLog: appendLog });
+        const result = await alipayAutoReport(input.value.trim(), { ...getReportOptions(), onLog: appendLog });
         const newReportedId = result.newReportedZfbSubMchId || '';
         alipayResultInput.value = newReportedId;
         refreshCopyButton();
@@ -1184,13 +1220,14 @@
       resetResultOutputs();
       try {
         const merchantId = input.value.trim();
-        const wechatResult = await wechatAutoReport(merchantId, { onLog: appendLog });
+        const reportOptions = getReportOptions();
+        const wechatResult = await wechatAutoReport(merchantId, { ...reportOptions, onLog: appendLog });
         const newWxSubMchId = wechatResult.newWxSubMchId || '';
         resultInput.value = newWxSubMchId;
         refreshCopyButton();
         appendLog(`新上报微信子商户号: ${newWxSubMchId || '无'}`);
 
-        const alipayResult = await alipayAutoReport(merchantId, { onLog: appendLog });
+        const alipayResult = await alipayAutoReport(merchantId, { ...reportOptions, onLog: appendLog });
         const newZfbSubMchId = alipayResult.newZfbSubMchId || '';
         alipayResultInput.value = newZfbSubMchId;
         refreshCopyButton();
