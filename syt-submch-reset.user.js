@@ -1146,7 +1146,7 @@
     const appendLog = (line, isError = false) => {
       const time = formatDateTime(new Date());
       const row = document.createElement('div');
-      row.className = isError || /失败|错误|异常/.test(line) ? 'log-line error' : 'log-line';
+      row.className = isError === true ? 'log-line error' : 'log-line';
       row.textContent = `[${time}] ${line}`;
       logBox.appendChild(row);
       logBox.scrollTop = logBox.scrollHeight;

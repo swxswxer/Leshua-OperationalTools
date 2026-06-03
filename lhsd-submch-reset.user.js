@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         联合收单重置子商户号脚本工具
 // @namespace    https://om.leshuazf.com/
-// @version      0.0.10
+// @version      0.0.11
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号。
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -41,6 +41,22 @@
     nuccStatus: '网联',
     interconnectionStatus: '网联互联互通',
   };
+  const WECHAT_PAYMENT_PRESETS = [
+    {
+      name: '美团',
+      channelId: '755607656',
+      channelName: '天津三快飞跃科技有限公司',
+      subAppids: 'wx1fde2c33280d64b6;wx0e8672034309be8f',
+      jsapiPaths: 'https://openpay.meituan.com/;https://openpay-zc.st.meituan.com/',
+    },
+    {
+      name: '乐店宝',
+      channelId: '835134506',
+      channelName: '深圳富云数科信息技术有限公司',
+      subAppids: 'wx76a4c0a8a9ef465b',
+      jsapiPaths: '',
+    },
+  ];
 
   function pad(value) {
     return String(value).padStart(2, '0');
@@ -66,6 +82,18 @@
     } else {
       start.setDate(start.getDate() - (options.days || 1));
     }
+    return {
+      createStartTime: formatDateTime(start),
+      createEndTime: formatDateTime(end),
+    };
+  }
+
+  function getAroundDateRange(options = {}) {
+    const now = new Date();
+    const start = new Date(now);
+    const end = new Date(now);
+    start.setDate(start.getDate() - (options.beforeDays || 1));
+    end.setDate(end.getDate() + (options.afterDays || 1));
     return {
       createStartTime: formatDateTime(start),
       createEndTime: formatDateTime(end),
@@ -261,6 +289,39 @@
     }
   }
 
+  function getReportDataObject(response) {
+    return response && response.data && typeof response.data === 'object' ? response.data : {};
+  }
+
+  function assertReportBusinessSuccess(response, label) {
+    const reportData = getReportDataObject(response);
+    if (reportData.result != null && Number(reportData.result) !== 0) {
+      throw new Error(`${label}上报失败: ${reportData.msg || response.respMsg || JSON.stringify(response)}`);
+    }
+  }
+
+  function getOptionValue(options, key, defaultValue) {
+    return Object.prototype.hasOwnProperty.call(options, key) ? String(options[key] == null ? '' : options[key]) : defaultValue;
+  }
+
+  function hasWechatSytChannelOptions(options = {}) {
+    return Boolean(normalizeText(options.channelId) || normalizeText(options.channelName));
+  }
+
+  function hasAlipaySytChannelOptions(options = {}) {
+    return Boolean(normalizeText(options.sourcePid) || normalizeText(options.sourceName));
+  }
+
+  function hasWechatPaymentConfigOptions(options = {}) {
+    return Boolean(normalizeText(options.subAppids) || normalizeText(options.jsapiPaths));
+  }
+
+  function parseLooseDateTime(value) {
+    const text = normalizeText(value);
+    if (!text) return 0;
+    return new Date(text.replace(/\.0$/, '').replace(' ', 'T')).getTime() || 0;
+  }
+
   async function submitWechatReport(merchantId, options = {}) {
     assertMerchantId(merchantId);
     const params = new URLSearchParams({
@@ -287,6 +348,40 @@
 
   const reportMerchant = submitWechatReport;
 
+  async function submitSytWechatReport(merchantId, options = {}) {
+    assertMerchantId(merchantId);
+    const params = new URLSearchParams({
+      method: 'posreport',
+      merchantId,
+      channelId: getOptionValue(options, 'channelId', ''),
+      channelName: getOptionValue(options, 'channelName', ''),
+      notice: options.notice == null ? '1' : String(options.notice),
+      mchId: options.mchId || '1502075691',
+      configType: options.configType == null ? '1' : String(options.configType),
+      payType: options.payType || '2',
+    });
+    const data = await requestJson(`${SAAS}/wxsubmch.do?${params.toString()}`, {
+      method: 'GET',
+      headers: {
+        Referer: `${SAAS}/wxsubmch.do?method=page`,
+      },
+    });
+    if (Number(data.respCode) !== 0) {
+      throw new Error(`收银通微信上报失败: ${data.respMsg || JSON.stringify(data)}`);
+    }
+    assertReportBusinessSuccess(data, '收银通微信');
+    const wxMchId = normalizeText(getReportDataObject(data).wxMchId || data.wxMchId || data.data);
+    if (!/^\d+$/.test(wxMchId)) {
+      throw new Error(`收银通微信上报接口未返回微信子商户号: ${JSON.stringify(data)}`);
+    }
+    return {
+      ...data,
+      rawData: data.data,
+      data: wxMchId,
+      wxMchId,
+    };
+  }
+
   async function submitAlipayReport(merchantId, options = {}) {
     assertMerchantId(merchantId);
     const params = new URLSearchParams({
@@ -311,6 +406,39 @@
       throw new Error(`支付宝上报接口未返回支付宝子商户号: ${JSON.stringify(data)}`);
     }
     return data;
+  }
+
+  async function submitSytAlipayReport(merchantId, options = {}) {
+    assertMerchantId(merchantId);
+    const params = new URLSearchParams({
+      method: 'posreport',
+      merchantId,
+      sourcePid: getOptionValue(options, 'sourcePid', ''),
+      sourceName: getOptionValue(options, 'sourceName', ''),
+      report4M3Flag: options.report4M3Flag == null ? '2' : String(options.report4M3Flag),
+      configType: options.configType || '',
+      notice: options.notice == null ? '1' : String(options.notice),
+    });
+    const data = await requestJson(`${SAAS}/zfbsubmch.do?${params.toString()}`, {
+      method: 'GET',
+      headers: {
+        Referer: `${SAAS}/zfbsubmch.do?method=page`,
+      },
+    });
+    if (Number(data.respCode) !== 0) {
+      throw new Error(`收银通支付宝上报失败: ${data.respMsg || JSON.stringify(data)}`);
+    }
+    assertReportBusinessSuccess(data, '收银通支付宝');
+    const zfbSubMch = normalizeText(getReportDataObject(data).zfbSubMch || data.zfbSubMch || data.data);
+    if (!/^\d+$/.test(zfbSubMch)) {
+      throw new Error(`收银通支付宝上报接口未返回支付宝子商户号: ${JSON.stringify(data)}`);
+    }
+    return {
+      ...data,
+      rawData: data.data,
+      data: zfbSubMch,
+      zfbSubMch,
+    };
   }
 
   async function queryWechatMappings(merchantId, options = {}) {
@@ -373,6 +501,89 @@
       body,
     });
     return parseMappingHtml(html, 'alipay');
+  }
+
+  async function queryWxSubmchConfigRows(merchantId, wxSubMchId, options = {}) {
+    assertMerchantId(merchantId);
+    if (!/^\d+$/.test(String(wxSubMchId || ''))) {
+      throw new Error('微信子商户号不能为空，且必须为数字');
+    }
+    const range = getAroundDateRange({ beforeDays: 1, afterDays: 1 });
+    const body = buildFormBody({
+      fCreateTimeStart: options.fCreateTimeStart || range.createStartTime,
+      fCreateTimeEnd: options.fCreateTimeEnd || range.createEndTime,
+      fChannelType: '',
+      fPayType: '',
+      fStatus: '',
+      fCanTrade: '',
+      fUpdateTimeStart: '',
+      fUpdateTimeEnd: '',
+      fChannelId: '',
+      fWxSubMchId: wxSubMchId,
+      fAgentId1g: '',
+      fMerchantId: merchantId,
+      fAuthorizeState: '',
+      fInUse: '',
+      syncPlatform: '',
+      page: '1',
+      rows: options.rows || '15',
+    });
+    const data = await requestJson(`${SAAS}/wxsubmch.do?method=list`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        Origin: ORIGIN,
+        Referer: `${SAAS}/wxsubmch.do?method=page`,
+      },
+      body,
+    });
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    return rows.filter((row) => {
+      return normalizeText(row.fMerchantId) === String(merchantId) && normalizeText(row.fWxSubMchId) === String(wxSubMchId);
+    });
+  }
+
+  function pickLatestWxSubmchConfigRow(rows) {
+    return rows.slice().sort((left, right) => {
+      return parseLooseDateTime(right.fCreateTime) - parseLooseDateTime(left.fCreateTime);
+    })[0] || null;
+  }
+
+  async function bindWechatPaymentConfig(merchantId, wxSubMchId, options = {}) {
+    const rows = await queryWxSubmchConfigRows(merchantId, wxSubMchId, options);
+    const row = pickLatestWxSubmchConfigRow(rows);
+    if (!row || !row.fId) {
+      throw new Error(`未查询到微信子商户号 ${wxSubMchId} 对应的配置记录 id`);
+    }
+    const id = String(row.fId);
+    if (options.onConfigRow) options.onConfigRow(row);
+
+    const body = buildFormBody({
+      subAppids: getOptionValue(options, 'subAppids', ''),
+      jsapiPaths: getOptionValue(options, 'jsapiPaths', ''),
+      id,
+      isSubmitted: '1',
+    });
+    const html = await requestText(`${SAAS}/wxsubmch.do?method=configReport`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Origin: ORIGIN,
+        Referer: `${SAAS}/wxsubmch.do?method=getByReportConfigId&reportConfigId=0&id=${encodeURIComponent(id)}`,
+      },
+      body,
+    });
+    const text = summarizeHtml(html);
+    if (/没有该项操作权限|失败|错误|异常/.test(text)) {
+      throw new Error(`微信支付参数绑定失败: ${text}`);
+    }
+    return {
+      ok: true,
+      id,
+      row,
+      message: text,
+      html,
+    };
   }
 
   function parseMappingHtml(html, type = 'wechat') {
@@ -657,6 +868,32 @@
     };
   }
 
+  async function pollWechatEnabledMappings(merchantId, wxSubMchId, options = {}) {
+    assertMerchantId(merchantId);
+    const firstDelayMs = options.wechatFirstQueryDelayMs == null ? 3000 : options.wechatFirstQueryDelayMs;
+    const intervalMs = options.wechatConfirmIntervalMs == null ? 2000 : options.wechatConfirmIntervalMs;
+    const maxRetries = options.wechatConfirmRetries == null ? 3 : options.wechatConfirmRetries;
+
+    await sleep(firstDelayMs);
+    for (let index = 0; index <= maxRetries; index += 1) {
+      if (index > 0) await sleep(intervalMs);
+      const rows = await queryWechatMappings(merchantId, {
+        ...options,
+        wxSubMchId,
+        ...getDateRange({ days: 1 }),
+      });
+      const enabledRows = pickRowsByStatus(rows, STATUS.ENABLED);
+      if (enabledRows.length > 0) {
+        return { rows, enabledRows };
+      }
+    }
+    throw new Error(`轮询超时，未查询到微信子商户号 ${wxSubMchId} 的启用映射记录`);
+  }
+
+  async function confirmNewWechatMappings(merchantId, wxSubMchId, options = {}) {
+    return pollWechatEnabledMappings(merchantId, wxSubMchId, options);
+  }
+
   async function disableOldEnabledWechatMappings(merchantId, newWxSubMchId, options = {}) {
     const rows = await queryWechatMappings(merchantId, {
       ...options,
@@ -751,21 +988,34 @@
     const userName = await assertCurrentUserAllowed();
     log(`当前用户 ${userName} 已通过${BUSINESS_NAME}白名单校验`);
     log(`开始微信上报商户 ${merchantId}`);
-    const report = await submitWechatReport(merchantId, options);
+    const useSytReport = hasWechatSytChannelOptions(options);
+    log(`微信上报按钮: ${useSytReport ? '收银通上报' : '手动上报'}`);
+    if (useSytReport) {
+      log(`微信上报渠道: ${getOptionValue(options, 'channelId', '')} ${getOptionValue(options, 'channelName', '')}`);
+    }
+    const report = useSytReport ? await submitSytWechatReport(merchantId, options) : await submitWechatReport(merchantId, options);
     const newWxSubMchId = String(report.data);
     log(`上报任务已提交，返回微信子商户号: ${newWxSubMchId}`);
 
-    log('等待 3 秒后查询新微信子商户号映射记录，并每隔 1.5 秒确认一次');
-    const enableResult = await enableNewWechatMappings(merchantId, newWxSubMchId, {
-      ...options,
-      onGroup: (group) => {
-        const paramsText = Object.entries(group.statusParams)
-            .map(([key, value]) => `${key}=${value}`)
-            .join('&');
-        log(`启用新微信子商户号 ${group.wxSubMchId}: ${paramsText}`);
-      },
-    });
-    log(`新微信子商户号启用成功，处理 ${enableResult.changedGroups.length} 个分组`);
+    let enableResult = null;
+    let confirmResult = null;
+    if (useSytReport) {
+      log('等待 3 秒后查询新微信子商户号启用状态，没有查到则每隔 2 秒重试，最多重试 3 次');
+      confirmResult = await confirmNewWechatMappings(merchantId, newWxSubMchId, options);
+      log(`新微信子商户号已启用，查询到 ${confirmResult.enabledRows.length} 条启用记录`);
+    } else {
+      log('等待 3 秒后查询新微信子商户号映射记录，并每隔 1.5 秒确认一次');
+      enableResult = await enableNewWechatMappings(merchantId, newWxSubMchId, {
+        ...options,
+        onGroup: (group) => {
+          const paramsText = Object.entries(group.statusParams)
+              .map(([key, value]) => `${key}=${value}`)
+              .join('&');
+          log(`启用新微信子商户号 ${group.wxSubMchId}: ${paramsText}`);
+        },
+      });
+      log(`新微信子商户号启用成功，处理 ${enableResult.changedGroups.length} 个分组`);
+    }
 
     log('查询 5 年内旧启用微信子商户号并禁用');
     const disableResult = await disableOldEnabledWechatMappings(merchantId, newWxSubMchId, {
@@ -779,13 +1029,35 @@
     });
     log(`旧微信子商户号禁用完成，处理 ${disableResult.changedGroups.length} 个分组`);
 
+    let paymentConfigResult = null;
+    if (hasWechatPaymentConfigOptions(options)) {
+      log('检测到微信支付参数，开始绑定 appid / 支付授权目录');
+      try {
+        paymentConfigResult = await bindWechatPaymentConfig(merchantId, newWxSubMchId, {
+          ...options,
+          onConfigRow: (row) => log(`查询到微信配置记录 id: ${row.fId}`),
+        });
+        log('微信支付参数绑定完成');
+      } catch (error) {
+        const errorMessage = `微信支付参数绑定失败: ${error.message}`;
+        paymentConfigResult = {
+          ok: false,
+          error: error.message,
+        };
+        logs.push(`[${formatDateTime(new Date())}] ${errorMessage}`);
+        if (options.onLog) options.onLog(errorMessage, true);
+      }
+    }
+
     const result = {
       merchantId,
       report,
       newWxSubMchId,
       newReportedWxSubMchId: newWxSubMchId,
       enableResult,
+      confirmResult,
       disableResult,
+      paymentConfigResult,
       logs,
     };
     log(`完成。新上报微信子商户号: ${newWxSubMchId}`);
@@ -805,7 +1077,12 @@
     const userName = await assertCurrentUserAllowed();
     log(`当前用户 ${userName} 已通过${BUSINESS_NAME}白名单校验`);
     log(`开始支付宝上报商户 ${merchantId}`);
-    const report = await submitAlipayReport(merchantId, options);
+    const useSytReport = hasAlipaySytChannelOptions(options);
+    log(`支付宝上报按钮: ${useSytReport ? '收银通上报' : '手动上报'}`);
+    if (useSytReport) {
+      log(`支付宝上报渠道: ${getOptionValue(options, 'sourcePid', '')} ${getOptionValue(options, 'sourceName', '')}`);
+    }
+    const report = useSytReport ? await submitSytAlipayReport(merchantId, options) : await submitAlipayReport(merchantId, options);
     const newZfbSubMchId = String(report.data);
     log(`支付宝上报任务已提交，返回支付宝子商户号: ${newZfbSubMchId}`);
 
@@ -825,6 +1102,10 @@
     });
     log(`旧支付宝子商户号禁用完成，处理 ${disableResult.changedGroups.length} 个分组`);
 
+    if (hasWechatPaymentConfigOptions(options)) {
+      log('检测到微信支付参数，但本次未产生新微信子商户号，跳过微信支付参数绑定');
+    }
+
     const result = {
       merchantId,
       report,
@@ -840,9 +1121,9 @@
 
   async function allAutoReport(merchantId, options = {}) {
     const logs = [];
-    const onLog = (message) => {
+    const onLog = (message, isError) => {
       logs.push(`[${formatDateTime(new Date())}] ${message}`);
-      if (options.onLog) options.onLog(message, logs.slice());
+      if (options.onLog) options.onLog(message, isError === true ? true : logs.slice());
     };
     const wechatResult = await wechatAutoReport(merchantId, { ...options, onLog });
     const alipayResult = await alipayAutoReport(merchantId, { ...options, onLog });
@@ -964,6 +1245,57 @@
         opacity: 1;
         text-shadow: none;
       }
+      #lhsd-auto-report-panel .optional-title {
+        margin-top: 10px;
+        color: #374151;
+        font-weight: 700;
+      }
+      #lhsd-auto-report-panel .optional-title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      #lhsd-auto-report-panel .optional-title-row .optional-title {
+        margin-top: 0;
+      }
+      #lhsd-auto-report-panel .preset-select {
+        min-width: 116px;
+        height: 28px;
+        border: 1px solid #c7d2fe;
+        background: #eff6ff;
+        color: #1d4ed8;
+        cursor: pointer;
+        font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      }
+      #lhsd-auto-report-panel .optional-content {
+        display: none;
+      }
+      #lhsd-auto-report-panel .optional-content.open {
+        display: block;
+      }
+      #lhsd-auto-report-panel .optional-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      #lhsd-auto-report-panel .optional-row.single {
+        grid-template-columns: 1fr;
+      }
+      #lhsd-auto-report-panel .optional-field {
+        display: grid;
+        grid-template-columns: 86px 1fr;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      #lhsd-auto-report-panel .optional-field label {
+        color: #374151;
+        font-weight: 700;
+        line-height: 30px;
+      }
       #lhsd-auto-report-panel pre {
         height: 168px;
         margin: 10px 0 0;
@@ -997,11 +1329,33 @@
       }
       #lhsd-auto-report-panel .copy-actions {
         display: flex;
-        justify-content: flex-end;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
         margin-top: 8px;
       }
       #lhsd-auto-report-panel .copy-actions button {
         min-width: 96px;
+      }
+      #lhsd-auto-report-panel .log-section {
+        display: block;
+      }
+      #lhsd-auto-report-panel .log-section:not(.open) pre {
+        height: 34px;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      #lhsd-auto-report-panel .log-section:not(.open) .log-line {
+        display: none;
+      }
+      #lhsd-auto-report-panel .log-section:not(.open) .log-line:last-child {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #lhsd-auto-report-panel .log-section:not(.open) .log-actions {
+        display: none;
       }
       #lhsd-auto-report-panel .result-label {
         margin-top: 10px;
@@ -1037,6 +1391,37 @@
           <div>
             <input id="om-auto-report-merchant" type="text" inputmode="numeric" placeholder="乐刷商户号">
           </div>
+          <div class="optional-title-row">
+            <div class="optional-title">可选参数</div>
+            <select id="lhsd-preset-select" class="preset-select" title="选择预设配置">
+              <option value="none">无</option>
+              <option value="custom">自定义</option>
+              ${WECHAT_PAYMENT_PRESETS.map((preset, index) => `
+                <option value="preset-${index}">${preset.name}</option>
+              `).join('')}
+            </select>
+          </div>
+          <div id="lhsd-optional-content" class="optional-content">
+            <div class="optional-title">微信上报渠道号</div>
+            <div class="optional-row">
+              <input id="lhsd-wx-channel-id" type="text" placeholder="渠道号">
+              <input id="lhsd-wx-channel-name" type="text" placeholder="渠道号主体">
+            </div>
+            <div class="optional-title">支付宝上报渠道号</div>
+            <div class="optional-row">
+              <input id="lhsd-alipay-channel-id" type="text" placeholder="渠道号">
+              <input id="lhsd-alipay-channel-name" type="text" placeholder="渠道号主体">
+            </div>
+            <div class="optional-title">微信支付参数</div>
+            <div class="optional-field">
+              <label for="lhsd-appid">appid</label>
+              <input id="lhsd-appid" type="text" placeholder="appid">
+            </div>
+            <div class="optional-field">
+              <label for="lhsd-pay-auth-dir">支付授权目录</label>
+              <input id="lhsd-pay-auth-dir" type="text" placeholder="支付授权目录">
+            </div>
+          </div>
           <div class="actions">
             <button id="om-auto-report-wechat" type="button">微信重置子商户号</button>
             <button id="om-auto-report-alipay" type="button">支付宝重置子商户号</button>
@@ -1051,11 +1436,14 @@
             <input id="om-auto-report-alipay-result" type="text" readonly placeholder="执行成功后显示">
           </div>
           <div class="copy-actions">
+            <button id="om-auto-report-log-toggle" type="button">展开日志</button>
             <button id="om-auto-report-copy" type="button" disabled>复制</button>
           </div>
-          <pre id="om-auto-report-log"></pre>
-          <div class="log-actions">
-            <button id="om-auto-report-clear" type="button">清空日志</button>
+          <div id="om-auto-report-log-section" class="log-section">
+            <pre id="om-auto-report-log"></pre>
+            <div class="log-actions">
+              <button id="om-auto-report-clear" type="button">清空日志</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1064,6 +1452,12 @@
 
     const floatBall = panel.querySelector('.float-ball');
     const input = panel.querySelector('#om-auto-report-merchant');
+    const wxChannelIdInput = panel.querySelector('#lhsd-wx-channel-id');
+    const wxChannelNameInput = panel.querySelector('#lhsd-wx-channel-name');
+    const alipayChannelIdInput = panel.querySelector('#lhsd-alipay-channel-id');
+    const alipayChannelNameInput = panel.querySelector('#lhsd-alipay-channel-name');
+    const appidInput = panel.querySelector('#lhsd-appid');
+    const payAuthDirInput = panel.querySelector('#lhsd-pay-auth-dir');
     const logBox = panel.querySelector('#om-auto-report-log');
     const wechatButton = panel.querySelector('#om-auto-report-wechat');
     const alipayButton = panel.querySelector('#om-auto-report-alipay');
@@ -1073,6 +1467,10 @@
     const copyButton = panel.querySelector('#om-auto-report-copy');
     const alipayResultInput = panel.querySelector('#om-auto-report-alipay-result');
     const closeButton = panel.querySelector('.close');
+    const presetSelect = panel.querySelector('#lhsd-preset-select');
+    const optionalContent = panel.querySelector('#lhsd-optional-content');
+    const logToggleButton = panel.querySelector('#om-auto-report-log-toggle');
+    const logSection = panel.querySelector('#om-auto-report-log-section');
 
     const pageMerchantInput = document.querySelector('input[name="merchantId"], #merchantId');
     if (pageMerchantInput && pageMerchantInput.value) input.value = pageMerchantInput.value.trim();
@@ -1080,8 +1478,9 @@
     const appendLog = (line, isError = false) => {
       const time = formatDateTime(new Date());
       const row = document.createElement('div');
-      row.className = isError || /失败|错误|异常/.test(line) ? 'log-line error' : 'log-line';
+      row.className = isError === true ? 'log-line error' : 'log-line';
       row.textContent = `[${time}] ${line}`;
+      row.title = row.textContent;
       logBox.appendChild(row);
       logBox.scrollTop = logBox.scrollHeight;
     };
@@ -1089,6 +1488,16 @@
       wechatButton.disabled = busy;
       alipayButton.disabled = busy;
       allButton.disabled = busy;
+    };
+    const getReportOptions = () => {
+      return {
+        channelId: wxChannelIdInput.value.trim(),
+        channelName: wxChannelNameInput.value.trim(),
+        sourcePid: alipayChannelIdInput.value.trim(),
+        sourceName: alipayChannelNameInput.value.trim(),
+        subAppids: appidInput.value.trim(),
+        jsapiPaths: payAuthDirInput.value.trim(),
+      };
     };
     const getCopyText = () => {
       const wechatValue = resultInput.value.trim();
@@ -1108,13 +1517,35 @@
       alipayResultInput.value = '';
       refreshCopyButton();
     };
+    const clearOptionalInputs = () => {
+      wxChannelIdInput.value = '';
+      wxChannelNameInput.value = '';
+      alipayChannelIdInput.value = '';
+      alipayChannelNameInput.value = '';
+      appidInput.value = '';
+      payAuthDirInput.value = '';
+    };
+    const setOptionalContentOpen = (open) => {
+      optionalContent.classList.toggle('open', open);
+    };
+    const setLogSectionOpen = (open) => {
+      logSection.classList.toggle('open', open);
+      logToggleButton.textContent = open ? '收起日志' : '展开日志';
+    };
+    const applyWechatPaymentPreset = (preset) => {
+      wxChannelIdInput.value = preset.channelId;
+      wxChannelNameInput.value = preset.channelName;
+      appidInput.value = preset.subAppids;
+      payAuthDirInput.value = preset.jsapiPaths;
+      appendLog(`已选择预设配置: ${preset.name}`);
+    };
 
     wechatButton.addEventListener('click', async () => {
       setBusy(true);
       logBox.innerHTML = '';
       resetResultOutputs();
       try {
-        const result = await autoReport(input.value.trim(), { onLog: appendLog });
+        const result = await autoReport(input.value.trim(), { ...getReportOptions(), onLog: appendLog });
         const newReportedId = result.newReportedWxSubMchId || '';
         resultInput.value = newReportedId;
         refreshCopyButton();
@@ -1133,7 +1564,7 @@
       logBox.innerHTML = '';
       resetResultOutputs();
       try {
-        const result = await alipayAutoReport(input.value.trim(), { onLog: appendLog });
+        const result = await alipayAutoReport(input.value.trim(), { ...getReportOptions(), onLog: appendLog });
         const newReportedId = result.newReportedZfbSubMchId || '';
         alipayResultInput.value = newReportedId;
         refreshCopyButton();
@@ -1153,13 +1584,14 @@
       resetResultOutputs();
       try {
         const merchantId = input.value.trim();
-        const wechatResult = await wechatAutoReport(merchantId, { onLog: appendLog });
+        const reportOptions = getReportOptions();
+        const wechatResult = await wechatAutoReport(merchantId, { ...reportOptions, onLog: appendLog });
         const newWxSubMchId = wechatResult.newWxSubMchId || '';
         resultInput.value = newWxSubMchId;
         refreshCopyButton();
         appendLog(`新上报微信子商户号: ${newWxSubMchId || '无'}`);
 
-        const alipayResult = await alipayAutoReport(merchantId, { onLog: appendLog });
+        const alipayResult = await alipayAutoReport(merchantId, { ...reportOptions, onLog: appendLog });
         const newZfbSubMchId = alipayResult.newZfbSubMchId || '';
         alipayResultInput.value = newZfbSubMchId;
         refreshCopyButton();
@@ -1194,6 +1626,30 @@
     closeButton.addEventListener('click', () => {
       panel.classList.add('collapsed');
     });
+    presetSelect.addEventListener('change', () => {
+      if (presetSelect.value === 'none') {
+        clearOptionalInputs();
+        setOptionalContentOpen(false);
+        appendLog('已选择预设配置: 无');
+        return;
+      }
+      setOptionalContentOpen(true);
+      if (presetSelect.value === 'custom') {
+        appendLog('已选择预设配置: 自定义');
+        return;
+      }
+      const presetIndex = Number(presetSelect.value.replace('preset-', ''));
+      const preset = WECHAT_PAYMENT_PRESETS[presetIndex];
+      if (preset) applyWechatPaymentPreset(preset);
+    });
+    logToggleButton.addEventListener('click', () => {
+      setLogSectionOpen(!logSection.classList.contains('open'));
+    });
+    document.addEventListener('click', (event) => {
+      if (!panel.classList.contains('collapsed') && !panel.contains(event.target)) {
+        panel.classList.add('collapsed');
+      }
+    });
   }
 
   function shouldCreatePanel() {
@@ -1216,13 +1672,19 @@
     allAutoReport,
     submitWechatReport,
     submitAlipayReport,
+    submitSytWechatReport,
+    submitSytAlipayReport,
+    bindWechatPaymentConfig,
     reportMerchant,
     queryWechatMappings,
     queryAlipayMappings,
+    queryWxSubmchConfigRows,
     parseMappingHtml,
     pollWechatNewMappings,
+    pollWechatEnabledMappings,
     pollAlipayNewMappings,
     enableNewWechatMappings,
+    confirmNewWechatMappings,
     confirmNewAlipayMappings,
     disableOldEnabledWechatMappings,
     disableOldEnabledAlipayMappings,
