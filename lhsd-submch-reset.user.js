@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         联合收单重置子商户号脚本工具
 // @namespace    https://om.leshuazf.com/
-// @version      0.0.11
+// @version      0.0.12
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号。
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -1627,6 +1627,7 @@
         `乐刷商户号：${input.value.trim()}`,
         wechatValue ? `微信：${wechatValue}` : '',
         alipayValue ? `支付宝：${alipayValue}` : '',
+        '温馨提示：重置子商户号，代理记得自行检查商户费率，2个工作日内反馈，请知悉！',
       ].filter(Boolean).join('\n');
     };
     const refreshCopyButton = () => {

@@ -1,2 +1,5 @@
 .idea/
 .DS_Store
+node_modules
+outputs/
+scripts/build_order_excel.mjs
