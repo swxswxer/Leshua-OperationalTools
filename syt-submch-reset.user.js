@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         收银通重置子商户号工具脚本
 // @namespace    https://om.leshuazf.com/
-// @version      0.0.19
+// @version      0.0.20
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号。
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -1255,6 +1255,14 @@
         opacity: 1;
         text-shadow: none;
       }
+      #syt-auto-report-panel .merchant-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+      }
+      #syt-auto-report-panel .merchant-row button {
+        min-width: 64px;
+      }
       #syt-auto-report-panel .optional-title {
         margin-top: 10px;
         color: #374151;
@@ -1444,8 +1452,9 @@
           <button class="close" type="button" title="收起">x</button>
         </header>
         <div class="body">
-          <div>
+          <div class="merchant-row">
             <input id="om-auto-report-merchant" type="text" inputmode="numeric" placeholder="乐刷商户号">
+            <button id="om-auto-report-merchant-clear" type="button">清空</button>
           </div>
           <div class="optional-title-row">
             <div class="optional-title">可选参数</div>
@@ -1518,6 +1527,7 @@
 
     const floatBall = panel.querySelector('.float-ball');
     const input = panel.querySelector('#om-auto-report-merchant');
+    const merchantClearButton = panel.querySelector('#om-auto-report-merchant-clear');
     const wxChannelIdInput = panel.querySelector('#syt-wx-channel-id');
     const wxChannelNameInput = panel.querySelector('#syt-wx-channel-name');
     const alipayChannelIdInput = panel.querySelector('#syt-alipay-channel-id');
@@ -1563,6 +1573,7 @@
       wechatButton.disabled = busy;
       alipayButton.disabled = busy;
       allButton.disabled = busy;
+      merchantClearButton.disabled = busy;
       refreshProgressRetryability('wechat');
       refreshProgressRetryability('alipay');
     };
@@ -1855,6 +1866,12 @@
 
     clearButton.addEventListener('click', () => {
       logBox.innerHTML = '';
+    });
+    merchantClearButton.addEventListener('click', () => {
+      input.value = '';
+      logBox.innerHTML = '';
+      resetTaskState();
+      input.focus();
     });
     copyButton.addEventListener('click', async () => {
       const text = getCopyText();
