@@ -1593,8 +1593,8 @@
       if (!wechatValue && !alipayValue) return '';
       return [
         `乐刷商户号：${input.value.trim()}`,
-        wechatValue ? `微信：${wechatValue}` : '',
-        alipayValue ? `支付宝：${alipayValue}` : '',
+        wechatValue ? `微信子商户号：${wechatValue}` : '',
+        alipayValue ? `支付宝子商户号：${alipayValue}` : '',
         '温馨提示：重置子商户号，代理记得自行检查商户费率，2个工作日内反馈，请知悉！',
       ].filter(Boolean).join('\n');
     };
