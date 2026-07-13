@@ -6,10 +6,6 @@
 // @author       swx
 // @match        https://om.leshuazf.com/*
 // @grant        unsafeWindow
-// @grant        GM_xmlhttpRequest
-// @grant        GM.xmlHttpRequest
-// @connect      gitee.com
-// @connect      raw.giteeusercontent.com
 // @run-at       document-end
 // @updateURL    https://gitee.com/swxswxer1/submch-reset/raw/master/lhsd-submch-reset.user.js
 // @downloadURL  https://gitee.com/swxswxer1/submch-reset/raw/master/lhsd-submch-reset.user.js
@@ -21,11 +17,6 @@
 
   const ORIGIN = 'https://om.leshuazf.com';
   const SAAS = `${ORIGIN}/saasadmin`;
-  const BUSINESS_NAME = '联合收单';
-  const USER_NAME_SELECTOR = 'body > div.panel.layout-panel.layout-panel-north.layout-split-north > div > span.head > span';
-  const WHITELIST_URL = 'https://raw.giteeusercontent.com/swxswxer1/submch-reset/raw/master/lhsd-whitelist.json';
-  let whitelistCache = null;
-  let whitelistPromise = null;
   const STATUS = {
     UNNOTIFIED: '未通知',
     DISABLED: '禁用',
@@ -119,93 +110,6 @@
   function normalizeText(text) {
     return String(text || '').replace(/\s+/g, ' ').trim();
   }
-
-  function getLoginUserText() {
-    const localNode = document.querySelector(USER_NAME_SELECTOR);
-    if (localNode) return normalizeText(localNode.textContent);
-
-    try {
-      const topNode = window.top && window.top.document.querySelector(USER_NAME_SELECTOR);
-      if (topNode) return normalizeText(topNode.textContent);
-    } catch (error) {
-      return '';
-    }
-
-    return '';
-  }
-
-  function getLoginUserName() {
-    const text = getLoginUserText();
-    const match = text.match(/欢迎\s*([^（(\s]+)\s*[（(]/);
-    return match ? match[1] : '';
-  }
-
-  function requestWhitelistText(url) {
-    return new Promise((resolve, reject) => {
-      const requestUrl = `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
-      const request = typeof GM_xmlhttpRequest === 'function'
-        ? GM_xmlhttpRequest
-        : (typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function' ? GM.xmlHttpRequest : null);
-
-      if (request) {
-        request({
-          method: 'GET',
-          url: requestUrl,
-          headers: {
-            Accept: 'application/json,text/plain,*/*',
-          },
-          onload: (response) => {
-            if (response.status >= 200 && response.status < 300) {
-              resolve(response.responseText || '');
-              return;
-            }
-            reject(new Error(`HTTP ${response.status}`));
-          },
-          onerror: () => reject(new Error('网络请求失败')),
-          ontimeout: () => reject(new Error('网络请求超时')),
-        });
-        return;
-      }
-
-      reject(new Error('油猴跨域请求能力不可用，请更新或重新安装脚本并允许 gitee.com 访问权限'));
-    });
-  }
-
-  function parseWhitelist(text) {
-    const data = JSON.parse(text);
-    if (!Array.isArray(data)) {
-      throw new Error('白名单文件必须是 JSON 数组');
-    }
-    return new Set(data.map((item) => normalizeText(item)).filter(Boolean));
-  }
-
-  async function getWhitelist() {
-    if (whitelistCache) return whitelistCache;
-    if (!whitelistPromise) {
-      whitelistPromise = requestWhitelistText(WHITELIST_URL).then(parseWhitelist);
-    }
-    try {
-      whitelistCache = await whitelistPromise;
-      return whitelistCache;
-    } catch (error) {
-      whitelistPromise = null;
-      throw new Error(`读取${BUSINESS_NAME}白名单失败: ${error.message}`);
-    }
-  }
-
-  async function assertCurrentUserAllowed() {
-    const userName = getLoginUserName();
-    if (!userName) {
-      throw new Error('无法识别当前登录用户，请在运营后台主页面加载完成后再试');
-    }
-    const whitelist = await getWhitelist();
-    if (!whitelist.has(userName)) {
-      throw new Error(`当前用户 ${userName} 不在${BUSINESS_NAME}白名单内，禁止重置子商户号`);
-    }
-    return userName;
-  }
-
-  getWhitelist().catch(() => undefined);
 
   function buildFormBody(params) {
     const body = new URLSearchParams();
@@ -997,8 +901,6 @@
     let newWxSubMchId;
     const useSytReport = hasWechatSytChannelOptions(options);
     try {
-      const userName = await assertCurrentUserAllowed();
-      log(`当前用户 ${userName} 已通过${BUSINESS_NAME}白名单校验`);
       log(`开始微信上报商户 ${merchantId}`);
       log(`微信上报按钮: ${useSytReport ? '收银通上报' : '手动上报'}`);
       if (useSytReport) {
@@ -1108,8 +1010,6 @@
     let report;
     let newZfbSubMchId;
     try {
-      const userName = await assertCurrentUserAllowed();
-      log(`当前用户 ${userName} 已通过${BUSINESS_NAME}白名单校验`);
       log(`开始支付宝上报商户 ${merchantId}`);
       log(`支付宝上报按钮: ${useSytReport ? '收银通上报' : '手动上报'}`);
       if (useSytReport) {
@@ -1176,10 +1076,20 @@
     const logs = [];
     const onLog = (message, isError) => {
       logs.push(`[${formatDateTime(new Date())}] ${message}`);
-      if (options.onLog) options.onLog(message, isError === true ? true : logs.slice());
+      if (options.onLog) options.onLog(message, isError === true);
     };
-    const wechatResult = await wechatAutoReport(merchantId, { ...options, onLog });
-    const alipayResult = await alipayAutoReport(merchantId, { ...options, onLog });
+    const [wechatState, alipayState] = await Promise.allSettled([
+      wechatAutoReport(merchantId, { ...options, onLog }),
+      alipayAutoReport(merchantId, { ...options, onLog }),
+    ]);
+    const failures = [wechatState, alipayState]
+        .filter((state) => state.status === 'rejected')
+        .map((state) => state.reason?.message || String(state.reason));
+    if (failures.length > 0) {
+      throw new Error(`全部重置存在失败流程: ${failures.join('; ')}`);
+    }
+    const wechatResult = wechatState.value;
+    const alipayResult = alipayState.value;
     return {
       merchantId,
       wechatResult,
@@ -1912,21 +1822,21 @@
       try {
         const merchantId = input.value.trim();
         const reportOptions = getReportOptions();
-        const wechatResult = await wechatAutoReport(merchantId, buildFlowOptions('wechat', merchantId, reportOptions));
-
-        const alipayResult = await alipayAutoReport(merchantId, buildFlowOptions('alipay', merchantId, reportOptions));
-        console.log('omAutoReport all result:', { wechatResult, alipayResult });
-      } catch (error) {
-        const wechatHasError = wechatProgress.querySelector('.progress-step.error');
-        const wechatComplete = wechatProgress.querySelectorAll('.progress-step.success').length === 3;
-        if (!wechatHasError && !wechatComplete) {
-          markFirstPendingProgressError('wechat');
-        } else if (wechatComplete) {
-          const alipayHasError = alipayProgress.querySelector('.progress-step.error');
-          if (!alipayHasError) markFirstPendingProgressError('alipay');
-        }
-        appendLog(`失败: ${error.message}`, true);
-        console.error(error);
+        const runFlow = async (type, runner) => {
+          try {
+            return await runner(merchantId, buildFlowOptions(type, merchantId, reportOptions));
+          } catch (error) {
+            const progress = getProgressContainer(type);
+            if (!progress.querySelector('.progress-step.error')) markFirstPendingProgressError(type);
+            appendLog(`${getTypeName(type)}重置失败: ${error.message}`, true);
+            throw error;
+          }
+        };
+        const results = await Promise.allSettled([
+          runFlow('wechat', wechatAutoReport),
+          runFlow('alipay', alipayAutoReport),
+        ]);
+        console.log('omAutoReport all result:', results);
       } finally {
         setBusy(false);
       }

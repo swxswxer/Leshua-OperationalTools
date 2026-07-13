@@ -6,8 +6,8 @@
 
 | 业务线 | 脚本文件 | 当前版本 | 控制台对象 | 悬浮球位置 |
 | --- | --- | --- | --- | --- |
-| 联合收单 | `lhsd-submch-reset.user.js` | `0.0.9` | `lhsdAutoReport` | 右下角 |
-| 收银通 | `syt-submch-reset.user.js` | `0.0.11` | `sytAutoReport` | 右下角上方 |
+| 联合收单 | `lhsd-submch-reset.user.js` | `1.0.0` | `lhsdAutoReport` | 右下角 |
+| 收银通 | `syt-submch-reset.user.js` | `1.0.0` | `sytAutoReport` | 右下角上方 |
 
 两个脚本可以同时安装。它们使用不同的面板容器 id，避免悬浮球互相覆盖：
 
@@ -50,67 +50,25 @@ https://gitee.com/swxswxer1/submch-reset/blob/master/lhsd-submch-reset.user.js
 支付宝：xxxx
 ```
 
-## 白名单
-
-脚本执行重置前会读取 Gitee 仓库中的远程白名单文件：
-
-| 业务线 | 白名单文件 | 脚本内读取地址 |
-| --- | --- | --- |
-| 联合收单 | `lhsd-whitelist.json` | `https://raw.giteeusercontent.com/swxswxer1/submch-reset/raw/master/lhsd-whitelist.json` |
-| 收银通 | `syt-whitelist.json` | `https://raw.giteeusercontent.com/swxswxer1/submch-reset/raw/master/syt-whitelist.json` |
-
-白名单文件是 JSON 字符串数组：
-
-```json
-[
-  "张三",
-  "李四"
-]
-```
-
-脚本会从顶部欢迎语解析当前登录用户姓名，例如：
-
-```js
-document.querySelector("body > div.panel.layout-panel.layout-panel-north.layout-split-north > div > span.head > span")
-```
-
-示例文本：
-
-```text
-欢迎 杨浩鑫(深圳移卡科技有限公司)
-```
-
-解析得到 `杨浩鑫` 后，与对应业务线白名单比对。读取失败、格式错误、姓名不在白名单，都会禁止执行重置。
-
-远程白名单读取使用 `GM_xmlhttpRequest`，脚本头部需要保留：
-
-```js
-// @grant        GM_xmlhttpRequest
-// @grant        GM.xmlHttpRequest
-// @connect      gitee.com
-// @connect      raw.giteeusercontent.com
-```
-
-注意：白名单是前端脚本层面的操作限制，用于防误操作和入口管控；真正权限仍以后端接口权限为准。
-
 ## 业务流程
+
+两个脚本均不再校验前端白名单，安装后即可使用；后台接口是否允许执行仍由当前登录账号的后端权限决定。点击“全部重置子商户号”时，微信和支付宝流程会并行执行，其中一边失败不会中止另一边。
 
 ### 联合收单微信
 
 1. 校验乐刷商户号必须是 10 位数字。
-2. 校验当前登录用户命中联合收单白名单。
-3. 调用微信上报接口。
-4. 获取上报接口返回的新微信子商户号。
-5. 上报后等待 3 秒。
-6. 每隔 1.5 秒查询新微信子商户号映射记录。
-7. 最近 3 次查询到的“未通知”通道集合一致后，设置新微信子商户号为启用。
-8. 查询 5 年内旧启用微信子商户号，并按 `微信子商户号 + payType` 分组禁用旧号。
+2. 调用微信上报接口。
+3. 获取上报接口返回的新微信子商户号。
+4. 上报后等待 3 秒。
+5. 每隔 1.5 秒查询新微信子商户号映射记录。
+6. 最近 3 次查询到的“未通知”通道集合一致后，设置新微信子商户号为启用。
+7. 查询 5 年内旧启用微信子商户号，并按 `微信子商户号 + payType` 分组禁用旧号。
 
 联合收单微信需要手动启用新上报的“未通知”记录。
 
 ### 联合收单支付宝
 
-1. 校验乐刷商户号和白名单。
+1. 校验乐刷商户号必须是 10 位数字。
 2. 调用支付宝上报接口。
 3. 获取新支付宝子商户号。
 4. 轮询确认新支付宝子商户号已启用。
@@ -120,7 +78,7 @@ document.querySelector("body > div.panel.layout-panel.layout-panel-north.layout-
 
 ### 收银通微信
 
-1. 校验乐刷商户号和收银通白名单。
+1. 校验乐刷商户号必须是 10 位数字。
 2. 调用收银通微信上报接口。
 3. 从响应 `data.wxMchId` 获取新微信子商户号。
 4. 上报后等待 3 秒。
@@ -131,7 +89,7 @@ document.querySelector("body > div.panel.layout-panel.layout-panel-north.layout-
 
 ### 收银通支付宝
 
-1. 校验乐刷商户号和收银通白名单。
+1. 校验乐刷商户号必须是 10 位数字。
 2. 调用收银通支付宝上报接口。
 3. 从响应 `data.zfbSubMch` 获取新支付宝子商户号。
 4. 轮询确认新支付宝子商户号已启用。
@@ -230,12 +188,8 @@ await sytAutoReport.autoReport('9550117355')
 | --- | --- |
 | `lhsd-submch-reset.user.js` | 联合收单 Tampermonkey 脚本 |
 | `syt-submch-reset.user.js` | 收银通 Tampermonkey 脚本 |
-| `lhsd-whitelist.json` | 联合收单远程白名单 |
-| `syt-whitelist.json` | 收银通远程白名单 |
 | `README.md` | 项目说明和维护入口 |
 
 
 5. 在 Tampermonkey 中手动检查更新，确认脚本版本已变更。
-
-如果只是修改白名单 JSON，不需要改脚本版本；白名单读取时带时间戳参数，会尽量避免缓存影响。
 
