@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         联合收单重置子商户号脚本工具
 // @namespace    https://om.leshuazf.com/
-// @version      1.0.0
+// @version      1.0.1
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号。
 // @author       swx
 // @match        https://om.leshuazf.com/*

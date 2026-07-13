@@ -6,8 +6,8 @@
 
 | 业务线 | 脚本文件 | 当前版本 | 控制台对象 | 悬浮球位置 |
 | --- | --- | --- | --- | --- |
-| 联合收单 | `lhsd-submch-reset.user.js` | `1.0.0` | `lhsdAutoReport` | 右下角 |
-| 收银通 | `syt-submch-reset.user.js` | `1.0.0` | `sytAutoReport` | 右下角上方 |
+| 联合收单 | `lhsd-submch-reset.user.js` | `1.0.1` | `lhsdAutoReport` | 右下角 |
+| 收银通 | `syt-submch-reset.user.js` | `1.0.1` | `sytAutoReport` | 右下角上方 |
 
 两个脚本可以同时安装。它们使用不同的面板容器 id，避免悬浮球互相覆盖：
 
@@ -192,4 +192,3 @@ await sytAutoReport.autoReport('9550117355')
 
 
 5. 在 Tampermonkey 中手动检查更新，确认脚本版本已变更。
-
