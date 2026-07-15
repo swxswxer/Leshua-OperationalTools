@@ -7,7 +7,7 @@
 | 业务线 | 脚本文件 | 当前版本 | 控制台对象 | 悬浮球位置 |
 | --- | --- | --- | --- | --- |
 | 联合收单 | `lhsd-submch-reset.user.js` | `1.0.1` | `lhsdAutoReport` | 右下角 |
-| 收银通 | `syt-submch-reset.user.js` | `1.0.1` | `sytAutoReport` | 右下角上方 |
+| 收银通 | `syt-submch-reset.user.js` | `1.0.2` | `sytAutoReport` | 右下角上方 |
 
 两个脚本可以同时安装。它们使用不同的面板容器 id，避免悬浮球互相覆盖：
 
@@ -42,6 +42,8 @@ https://gitee.com/swxswxer1/submch-reset/blob/master/lhsd-submch-reset.user.js
 5. 按需点击“微信重置子商户号”“支付宝重置子商户号”或“全部重置子商户号”。
 
 点击任意重置按钮时，脚本会先清空微信和支付宝两个输出框，避免上一次成功结果残留导致误复制。
+
+收银通脚本额外提供“配置商户 key”按钮。按钮使用当前输入的 10 位乐刷商户号调用 `merchant-key-info.do?method=add`，并根据响应中的“新增成功”和“新增失败”数量判断配置结果。
 
 执行成功后，输出框会展示新上报的微信/支付宝子商户号，并支持一键复制。复制内容格式：
 
@@ -180,6 +182,7 @@ await sytAutoReport.allAutoReport('9550117355')
 ```js
 await lhsdAutoReport.autoReport('9550117355')
 await sytAutoReport.autoReport('9550117355')
+await sytAutoReport.configureMerchantKey('9550117355')
 ```
 
 ## 文件说明

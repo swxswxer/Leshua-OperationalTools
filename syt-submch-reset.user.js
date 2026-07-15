@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         收银通重置子商户号工具脚本
 // @namespace    https://om.leshuazf.com/
-// @version      1.0.1
+// @version      1.0.2
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号。
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -206,6 +206,42 @@
     if (reportData.result != null && Number(reportData.result) !== 0) {
       throw new Error(`${label}上报失败: ${reportData.msg || response.respMsg || JSON.stringify(response)}`);
     }
+  }
+
+  async function configureMerchantKey(merchantId) {
+    assertMerchantId(merchantId);
+    const html = await requestText(`${SAAS}/merchant-key-info.do?method=add`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      referrer: `${SAAS}/merchant-key-info.do?method=addPage`,
+      body: buildFormBody({
+        merchants: merchantId,
+        submit: '确认提交',
+      }),
+    });
+    const htmlError = detectHtmlError(html);
+    if (htmlError) throw new Error(htmlError);
+
+    const message = getHtmlMessage(html);
+    const successMatch = message.match(/新增成功\s*[：:]\s*(\d+)\s*个/);
+    const failureMatch = message.match(/新增失败\s*[：:]\s*(\d+)\s*个/);
+    const successCount = successMatch ? Number(successMatch[1]) : 0;
+    const failureCount = failureMatch ? Number(failureMatch[1]) : 0;
+    if (!successMatch || !failureMatch) {
+      throw new Error(`无法确认商户 key 配置结果: ${summarizeHtml(html)}`);
+    }
+    if (successCount < 1 || failureCount > 0) {
+      throw new Error(`商户 key 配置失败，新增成功 ${successCount} 个，新增失败 ${failureCount} 个`);
+    }
+    return {
+      ok: true,
+      merchantId,
+      successCount,
+      failureCount,
+      message,
+    };
   }
 
   function getOptionValue(options, key, defaultValue) {
@@ -1401,6 +1437,7 @@
             <button id="om-auto-report-wechat" type="button">微信重置子商户号</button>
             <button id="om-auto-report-alipay" type="button">支付宝重置子商户号</button>
             <button id="om-auto-report-all" type="button">全部重置子商户号</button>
+            <button id="syt-configure-merchant-key" type="button">配置商户 key</button>
           </div>
           <div class="result-label">新上报微信子商户号</div>
           <div class="result-row">
@@ -1448,6 +1485,7 @@
     const wechatButton = panel.querySelector('#om-auto-report-wechat');
     const alipayButton = panel.querySelector('#om-auto-report-alipay');
     const allButton = panel.querySelector('#om-auto-report-all');
+    const configureMerchantKeyButton = panel.querySelector('#syt-configure-merchant-key');
     const clearButton = panel.querySelector('#om-auto-report-clear');
     const resultInput = panel.querySelector('#om-auto-report-result');
     const copyButton = panel.querySelector('#om-auto-report-copy');
@@ -1483,6 +1521,7 @@
       wechatButton.disabled = busy;
       alipayButton.disabled = busy;
       allButton.disabled = busy;
+      configureMerchantKeyButton.disabled = busy;
       merchantClearButton.disabled = busy;
       refreshProgressRetryability('wechat');
       refreshProgressRetryability('alipay');
@@ -1774,6 +1813,22 @@
       }
     });
 
+    configureMerchantKeyButton.addEventListener('click', async () => {
+      setBusy(true);
+      try {
+        const merchantId = input.value.trim();
+        appendLog(`开始为商户 ${merchantId || '(未填写)'} 配置商户 key`);
+        const result = await configureMerchantKey(merchantId);
+        appendLog(`商户 ${merchantId} 配置商户 key 成功`);
+        console.log('sytAutoReport configureMerchantKey result:', result);
+      } catch (error) {
+        appendLog(`配置商户 key 失败: ${error.message}`, true);
+        console.error(error);
+      } finally {
+        setBusy(false);
+      }
+    });
+
     clearButton.addEventListener('click', () => {
       logBox.innerHTML = '';
     });
@@ -1859,6 +1914,7 @@
     resolveWechatChannelOptions,
     resolveAlipayChannelOptions,
     bindWechatPaymentConfig,
+    configureMerchantKey,
     reportMerchant,
     queryWechatMappings,
     queryAlipayMappings,
