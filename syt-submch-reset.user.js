@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         收银通重置子商户号工具脚本
 // @namespace    https://om.leshuazf.com/
-// @version      1.0.2
+// @version      1.0.3
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号。
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -17,6 +17,7 @@
 
   const ORIGIN = 'https://om.leshuazf.com';
   const SAAS = `${ORIGIN}/saasadmin`;
+  const SYT_OMS = `${ORIGIN}/syt_oms`;
   const DEFAULT_WECHAT_CHANNEL_ID = '209096974';
   const DEFAULT_WECHAT_CHANNEL_NAME = '深圳市前海扫扫科技有限公司';
   const DEFAULT_ALIPAY_CHANNEL_ID = '2088621549599695';
@@ -30,6 +31,11 @@
     银联: 'unionStatus',
     网联: 'nuccStatus',
     网联互联互通: 'interconnectionStatus',
+  };
+  const CHANNEL_DEFAULT_FIELD = {
+    银联: 'unionDefault',
+    网联: 'nuccDefault',
+    网联互联互通: 'interconnectionDefault',
   };
   const STATUS_FIELD_CHANNEL = {
     unionStatus: '银联',
@@ -241,6 +247,243 @@
       successCount,
       failureCount,
       message,
+    };
+  }
+
+  function assertOmsSuccess(response, label, codeField = 'error_code') {
+    if (!response || String(response[codeField]) !== '0') {
+      const message = response?.error_msg || response?.returnDesc || JSON.stringify(response);
+      throw new Error(`${label}失败: ${message}`);
+    }
+    return response;
+  }
+
+  function pickLatestEnabledMappingGroup(rows, type) {
+    const subMchIdKey = type === 'alipay' ? 'zfbSubMchId' : 'wxSubMchId';
+    const groupMap = new Map();
+    rows.filter((row) => {
+      return normalizeText(row.noticeStatus) === STATUS.ENABLED
+        && String(row.payType || '2') === '2'
+        && /^\d+$/.test(String(row[subMchIdKey] || ''));
+    }).forEach((row) => {
+      const subMchId = String(row[subMchIdKey]);
+      if (!groupMap.has(subMchId)) {
+        groupMap.set(subMchId, {
+          subMchId,
+          payType: '2',
+          rows: [],
+          latestTime: 0,
+          defaultParams: {},
+        });
+      }
+      const group = groupMap.get(subMchId);
+      group.rows.push(row);
+      group.latestTime = Math.max(group.latestTime, parseLooseDateTime(row.createTime));
+      const field = CHANNEL_DEFAULT_FIELD[normalizeText(row.channel)];
+      if (field) group.defaultParams[field] = '0';
+    });
+    return Array.from(groupMap.values())
+        .filter((group) => Object.keys(group.defaultParams).length > 0)
+        .sort((left, right) => right.latestTime - left.latestTime)[0] || null;
+  }
+
+  function parseDefaultResultHtml(html, defaultParams) {
+    const message = getHtmlMessage(html);
+    const expectedTexts = Object.keys(defaultParams).map((field) => {
+      const channel = Object.entries(CHANNEL_DEFAULT_FIELD).find(([, value]) => value === field)?.[0] || '';
+      return `${channel}:设置默认成功`;
+    });
+    return {
+      ok: expectedTexts.length > 0 && expectedTexts.every((text) => message.includes(text)),
+      message,
+      html,
+    };
+  }
+
+  async function setMappingTradeDefault(merchantId, group, type) {
+    assertMerchantId(merchantId);
+    if (!group || !/^\d+$/.test(String(group.subMchId || ''))) {
+      throw new Error(`未找到可设置默认的${type === 'alipay' ? '支付宝' : '微信'}子商户号`);
+    }
+    const isAlipay = type === 'alipay';
+    const endpoint = isAlipay ? 'alipayMappingInfo.do' : 'wechatMappingInfo.do';
+    const subMchParam = isAlipay ? 'zfbSubMchId' : 'wxSubMchId';
+    const body = buildFormBody({
+      merchantId,
+      [subMchParam]: group.subMchId,
+      payType: group.payType || '2',
+      ...group.defaultParams,
+      submit: '提 交',
+    });
+    const html = await requestText(`${SAAS}/${endpoint}?method=setTradeDefault`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      referrer: `${SAAS}/${endpoint}?method=getSetTradeDefaultPage&merchantId=${encodeURIComponent(merchantId)}&${subMchParam}=${encodeURIComponent(group.subMchId)}&payType=${encodeURIComponent(group.payType || '2')}`,
+      body,
+    });
+    const htmlError = detectHtmlError(html);
+    if (htmlError) throw new Error(htmlError);
+    const result = parseDefaultResultHtml(html, group.defaultParams);
+    if (!result.ok) throw new Error(`设置默认结果未确认成功: ${result.message}`);
+    return result;
+  }
+
+  async function openOnlineReceiptAuthority(merchantId) {
+    const response = await requestJson(`${SYT_OMS}/syt-online-receipt-manager/batchOpenOnlineReceiptAuthhority`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json;charset=UTF-8',
+      },
+      referrer: `${SYT_OMS}/views/ods/onlineReceiptManagement.html`,
+      body: JSON.stringify({ merchantId, branchAuthorityFlag: 0 }),
+    });
+    return assertOmsSuccess(response, '开通在线收款单权限', 'returnCode');
+  }
+
+  async function reportOnlineReceiptChannel(merchantId, subMerchantId) {
+    const response = await requestJson(`${SYT_OMS}/syt-online-receipt-manager/report`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json;charset=UTF-8',
+      },
+      referrer: `${SYT_OMS}/views/ods/addressManagement.html`,
+      body: JSON.stringify({
+        hasSubMerchantId: 1,
+        feeType: null,
+        channel: null,
+        channelId: null,
+        subMerchantId,
+        merchantId,
+      }),
+    });
+    return assertOmsSuccess(response, `增加通道号 ${subMerchantId}`);
+  }
+
+  async function queryOnlineReceiptAddresses(merchantId, channel, subMerchantId) {
+    const params = new URLSearchParams({
+      pageNo: '1',
+      pageSize: '20',
+      merchantId,
+      startTime: '',
+      endTime: '',
+      channel: String(channel),
+      feeType: '',
+      applyStatus: '',
+      subMerchantId,
+    });
+    const response = await requestJson(`${SYT_OMS}/syt-online-receipt-manager/getBusinessAddresses?${params.toString()}`, {
+      method: 'GET',
+      referrer: `${SYT_OMS}/views/ods/addressManagement.html`,
+    });
+    assertOmsSuccess(response, '查询在线收款单经营地址记录');
+    const records = Array.isArray(response?.data?.page?.records) ? response.data.page.records : [];
+    return records.filter((record) => {
+      return String(record.merchantId) === String(merchantId)
+        && String(record.channel) === String(channel)
+        && String(record.subMerchantId) === String(subMerchantId);
+    });
+  }
+
+  async function pollOnlineReceiptAddressRecord(merchantId, channel, subMerchantId, options = {}) {
+    const intervalMs = options.onlineReceiptPollIntervalMs == null ? 1000 : options.onlineReceiptPollIntervalMs;
+    const timeoutMs = options.onlineReceiptPollTimeoutMs == null ? 15000 : options.onlineReceiptPollTimeoutMs;
+    const deadline = Date.now() + timeoutMs;
+    do {
+      const records = await queryOnlineReceiptAddresses(merchantId, channel, subMerchantId);
+      const record = records.slice().sort((left, right) => {
+        return parseLooseDateTime(right.createTime) - parseLooseDateTime(left.createTime);
+      })[0];
+      if (record?.id) return record;
+      if (Date.now() < deadline) await sleep(intervalMs);
+    } while (Date.now() < deadline);
+    throw new Error(`未查询到子商户号 ${subMerchantId} 的在线收款单经营地址记录`);
+  }
+
+  async function setOnlineReceiptBusinessAddress(id) {
+    if (!/^\d+$/.test(String(id || ''))) throw new Error('在线收款单经营地址记录 id 无效');
+    const response = await requestJson(`${SYT_OMS}/syt-online-receipt-manager/modifyBusinessAddress`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json;charset=UTF-8',
+      },
+      referrer: `${SYT_OMS}/views/ods/addressManagement.html`,
+      body: JSON.stringify({
+        modifyReason: '1',
+        entireCountry: '1',
+        cityCode: '0',
+        city: ' ',
+        provinceCode: '0',
+        province: ' ',
+        id: String(id),
+      }),
+    });
+    return assertOmsSuccess(response, `设置经营地址记录 ${id}`);
+  }
+
+  async function enableOnlineReceipt(merchantId, options = {}) {
+    assertMerchantId(merchantId);
+    const log = (message) => {
+      if (options.onLog) options.onLog(message);
+    };
+    log(`开始查询商户 ${merchantId} 的微信/支付宝启用映射记录`);
+    const range = getDateRange({ years: 5 });
+    const [wechatRows, alipayRows] = await Promise.all([
+      queryWechatMappings(merchantId, { ...range, payType: '2', status: '1' }),
+      queryAlipayMappings(merchantId, { ...range, payType: '2', status: '1' }),
+    ]);
+    const wechatGroup = pickLatestEnabledMappingGroup(wechatRows, 'wechat');
+    const alipayGroup = pickLatestEnabledMappingGroup(alipayRows, 'alipay');
+    if (!wechatGroup) throw new Error('未查询到可用的微信启用映射记录');
+    if (!alipayGroup) throw new Error('未查询到可用的支付宝启用映射记录');
+    log(`选中微信子商户号 ${wechatGroup.subMchId}，通道: ${wechatGroup.rows.map((row) => row.channel).join('、')}`);
+    log(`选中支付宝子商户号 ${alipayGroup.subMchId}，通道: ${alipayGroup.rows.map((row) => row.channel).join('、')}`);
+
+    log('开始设置微信默认通道号');
+    const wechatDefaultResult = await setMappingTradeDefault(merchantId, wechatGroup, 'wechat');
+    log('微信默认通道号设置完成');
+    log('开始设置支付宝默认通道号');
+    const alipayDefaultResult = await setMappingTradeDefault(merchantId, alipayGroup, 'alipay');
+    log('支付宝默认通道号设置完成');
+
+    log('开始开通在线收款单权限');
+    const authorityResult = await openOnlineReceiptAuthority(merchantId);
+    log('在线收款单权限开通完成');
+
+    log(`开始增加微信通道号 ${wechatGroup.subMchId}`);
+    const wechatReportResult = await reportOnlineReceiptChannel(merchantId, wechatGroup.subMchId);
+    log('微信通道号增加完成');
+    log(`开始增加支付宝通道号 ${alipayGroup.subMchId}`);
+    const alipayReportResult = await reportOnlineReceiptChannel(merchantId, alipayGroup.subMchId);
+    log('支付宝通道号增加完成');
+
+    log('查询微信/支付宝在线收款单经营地址记录');
+    const [wechatAddressRecord, alipayAddressRecord] = await Promise.all([
+      pollOnlineReceiptAddressRecord(merchantId, 1, wechatGroup.subMchId, options),
+      pollOnlineReceiptAddressRecord(merchantId, 2, alipayGroup.subMchId, options),
+    ]);
+    log(`查询到微信经营地址记录 id: ${wechatAddressRecord.id}`);
+    log(`查询到支付宝经营地址记录 id: ${alipayAddressRecord.id}`);
+    const wechatAddressResult = await setOnlineReceiptBusinessAddress(wechatAddressRecord.id);
+    log('微信经营地址设置完成');
+    const alipayAddressResult = await setOnlineReceiptBusinessAddress(alipayAddressRecord.id);
+    log('支付宝经营地址设置完成');
+    log(`商户 ${merchantId} 在线收款单开通完成`);
+
+    return {
+      merchantId,
+      wechatGroup,
+      alipayGroup,
+      wechatDefaultResult,
+      alipayDefaultResult,
+      authorityResult,
+      wechatReportResult,
+      alipayReportResult,
+      wechatAddressRecord,
+      alipayAddressRecord,
+      wechatAddressResult,
+      alipayAddressResult,
     };
   }
 
@@ -1438,6 +1681,7 @@
             <button id="om-auto-report-alipay" type="button">支付宝重置子商户号</button>
             <button id="om-auto-report-all" type="button">全部重置子商户号</button>
             <button id="syt-configure-merchant-key" type="button">配置商户 key</button>
+            <button id="syt-enable-online-receipt" type="button">开通在线收款单</button>
           </div>
           <div class="result-label">新上报微信子商户号</div>
           <div class="result-row">
@@ -1486,6 +1730,7 @@
     const alipayButton = panel.querySelector('#om-auto-report-alipay');
     const allButton = panel.querySelector('#om-auto-report-all');
     const configureMerchantKeyButton = panel.querySelector('#syt-configure-merchant-key');
+    const enableOnlineReceiptButton = panel.querySelector('#syt-enable-online-receipt');
     const clearButton = panel.querySelector('#om-auto-report-clear');
     const resultInput = panel.querySelector('#om-auto-report-result');
     const copyButton = panel.querySelector('#om-auto-report-copy');
@@ -1522,6 +1767,7 @@
       alipayButton.disabled = busy;
       allButton.disabled = busy;
       configureMerchantKeyButton.disabled = busy;
+      enableOnlineReceiptButton.disabled = busy;
       merchantClearButton.disabled = busy;
       refreshProgressRetryability('wechat');
       refreshProgressRetryability('alipay');
@@ -1829,6 +2075,20 @@
       }
     });
 
+    enableOnlineReceiptButton.addEventListener('click', async () => {
+      setBusy(true);
+      try {
+        const merchantId = input.value.trim();
+        const result = await enableOnlineReceipt(merchantId, { onLog: appendLog });
+        console.log('sytAutoReport enableOnlineReceipt result:', result);
+      } catch (error) {
+        appendLog(`开通在线收款单失败: ${error.message}`, true);
+        console.error(error);
+      } finally {
+        setBusy(false);
+      }
+    });
+
     clearButton.addEventListener('click', () => {
       logBox.innerHTML = '';
     });
@@ -1915,6 +2175,14 @@
     resolveAlipayChannelOptions,
     bindWechatPaymentConfig,
     configureMerchantKey,
+    enableOnlineReceipt,
+    pickLatestEnabledMappingGroup,
+    setMappingTradeDefault,
+    openOnlineReceiptAuthority,
+    reportOnlineReceiptChannel,
+    queryOnlineReceiptAddresses,
+    pollOnlineReceiptAddressRecord,
+    setOnlineReceiptBusinessAddress,
     reportMerchant,
     queryWechatMappings,
     queryAlipayMappings,
