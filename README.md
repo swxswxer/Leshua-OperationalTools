@@ -7,7 +7,7 @@
 | 业务线 | 脚本文件 | 当前版本 | 控制台对象 | 悬浮球位置 |
 | --- | --- | --- | --- | --- |
 | 联合收单 | `lhsd-submch-reset.user.js` | `1.0.1` | `lhsdAutoReport` | 右下角 |
-| 收银通 | `syt-submch-reset.user.js` | `1.0.3` | `sytAutoReport` | 右下角上方 |
+| 收银通 | `syt-submch-reset.user.js` | `1.0.9` | `sytAutoReport` | 右下角上方 |
 
 两个脚本可以同时安装。它们使用不同的面板容器 id，避免悬浮球互相覆盖：
 
@@ -46,6 +46,16 @@ https://gitee.com/swxswxer1/submch-reset/blob/master/lhsd-submch-reset.user.js
 收银通脚本额外提供“配置商户 key”按钮。按钮使用当前输入的 10 位乐刷商户号调用 `merchant-key-info.do?method=add`，并根据响应中的“新增成功”和“新增失败”数量判断配置结果。
 
 “开通在线收款单”按钮会选择5年内创建时间最新的线下启用微信、支付宝子商户号，依次设置默认通道、开通收款单权限、增加两个支付通道，并将对应经营地址设置为全国。
+
+收银通脚本底部“更多工具”提供“码牌划转”。进入后填写码牌开始编号、码牌结束编号、原代理商和新代理商，脚本会生成后台批量转移模板，并使用与后台页面一致的原生表单 + 隐藏 iframe 方式上传。后台受理后，脚本每 2 秒无缓存查询一次消息中心，最长等待 60 秒，并按消息正文里的码牌范围和代理商编号匹配本次结果。轮询会先按消息ID排除提交前已有记录；发现新消息但四项参数不一致时，会在日志中输出该消息的实际参数，方便定位后台结果格式变化。
+
+码牌划转结果状态：
+
+- 绿色：消息中心已确认划转成功。
+- 红色：上传失败、查询失败或后台返回业务失败，页面和日志会展示具体原因。
+- 橙色：后台已受理，但 60 秒内未查询到结果，需要到消息中心确认。
+
+码牌 Excel 由脚本内嵌的官方模板生成，只替换第二行的码牌范围和代理商编号，保留模板原有的样式、共享字符串、WPS 元数据及工作簿结构。码牌编号继续按文本保存，前导零不会丢失。模板 ZIP 处理使用固定版本的 JSZip `3.10.1`。
 
 执行成功后，输出框会展示新上报的微信/支付宝子商户号，并支持一键复制。复制内容格式：
 
@@ -187,6 +197,24 @@ await sytAutoReport.autoReport('9550117355')
 await sytAutoReport.configureMerchantKey('9550117355')
 await sytAutoReport.enableOnlineReceipt('9550117355')
 ```
+
+码牌划转也可以在控制台调用：
+
+```js
+await sytAutoReport.transferCodePlates({
+  startCode: '0163521800488',
+  endCode: '0163521800488',
+  sourceAgent: '5267151',
+  targetAgent: '3287859',
+})
+```
+
+相关底层函数：
+
+- `createCodePlateTransferFile(values)`：基于内嵌官方模板异步生成待上传的 Excel 文件，调用时需要 `await`。
+- `queryCodePlateTransferMessages(values)`：查询并解析匹配参数的消息中心记录。
+- `submitCodePlateTransfer(values)`：只上传划转任务，不轮询最终结果。
+- `transferCodePlates(values, options)`：执行生成、上传和结果轮询完整流程。
 
 ## 文件说明
 
