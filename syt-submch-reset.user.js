@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         收银通重置子商户号工具脚本
 // @namespace    https://om.leshuazf.com/
-// @version      1.0.11
+// @version      1.0.12
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号。
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -15,7 +15,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '1.0.11';
+  const SCRIPT_VERSION = '1.0.12';
   const ORIGIN = 'https://om.leshuazf.com';
   const SAAS = `${ORIGIN}/saasadmin`;
   const SYT_OMS = `${ORIGIN}/syt_oms`;
@@ -853,13 +853,15 @@
     if (!normalized.startCode || !normalized.endCode || !normalized.sourceAgent || !normalized.targetAgent) {
       throw new Error('请完整填写四项划转信息');
     }
-    if (!/^\d+$/.test(normalized.startCode) || !/^\d+$/.test(normalized.endCode)) {
-      throw new Error('码牌开始编号和结束编号只能填写数字');
+    if (!/^[A-Za-z0-9]+$/.test(normalized.startCode) || !/^[A-Za-z0-9]+$/.test(normalized.endCode)) {
+      throw new Error('码牌开始编号和结束编号只能填写英文字母或数字');
     }
     if (normalized.startCode.length !== normalized.endCode.length) {
       throw new Error('码牌开始编号和结束编号长度必须一致');
     }
-    if (BigInt(normalized.startCode) > BigInt(normalized.endCode)) {
+    if (/^\d+$/.test(normalized.startCode)
+      && /^\d+$/.test(normalized.endCode)
+      && BigInt(normalized.startCode) > BigInt(normalized.endCode)) {
       throw new Error('码牌开始编号不能大于结束编号');
     }
     if (!/^\d+$/.test(normalized.sourceAgent) || !/^\d+$/.test(normalized.targetAgent)) {
@@ -2397,11 +2399,11 @@
             <div class="transfer-fields">
               <div class="transfer-field">
                 <label for="syt-code-plate-start">码牌开始编号</label>
-                <input id="syt-code-plate-start" type="text" inputmode="numeric" autocomplete="off" placeholder="请输入开始编号">
+                <input id="syt-code-plate-start" type="text" autocomplete="off" placeholder="请输入开始编号">
               </div>
               <div class="transfer-field">
                 <label for="syt-code-plate-end">码牌结束编号</label>
-                <input id="syt-code-plate-end" type="text" inputmode="numeric" autocomplete="off" placeholder="请输入结束编号">
+                <input id="syt-code-plate-end" type="text" autocomplete="off" placeholder="请输入结束编号">
               </div>
             </div>
           </div>
