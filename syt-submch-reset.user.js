@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         收银通重置子商户号工具脚本
 // @namespace    https://om.leshuazf.com/
-// @version      1.0.12
+// @version      1.0.13
 // @description  自动执行运营后台微信/支付宝子商户号上报、轮询确认、禁用旧号，并输出新上报子商户号。
 // @author       swx
 // @match        https://om.leshuazf.com/*
@@ -15,7 +15,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '1.0.12';
+  const SCRIPT_VERSION = '1.0.13';
   const ORIGIN = 'https://om.leshuazf.com';
   const SAAS = `${ORIGIN}/saasadmin`;
   const SYT_OMS = `${ORIGIN}/syt_oms`;
@@ -833,6 +833,10 @@
 
   function getStatusName(statusValue) {
     return String(statusValue) === '1' ? STATUS.ENABLED : STATUS.DISABLED;
+  }
+
+  function shouldDisableOldSubMch(options = {}) {
+    return options.disableOldSubMch !== false;
   }
 
   function sleep(ms) {
@@ -1735,22 +1739,28 @@
     }
 
     let disableResult;
-    try {
-      log('查询 5 年内旧启用微信子商户号并禁用');
-      disableResult = await disableOldEnabledWechatMappings(merchantId, newWxSubMchId, {
-        ...options,
-        onGroup: (group) => {
-          const paramsText = Object.entries(group.statusParams)
-              .map(([key, value]) => `${key}=${value}`)
-              .join('&');
-          log(`禁用旧微信子商户号 ${group.wxSubMchId}: ${paramsText}`);
-        },
-      });
-      log(`旧微信子商户号禁用完成，处理 ${disableResult.changedGroups.length} 个分组`);
-      notifyProgress(options, 'wechat', 'disable', 'success');
-    } catch (error) {
-      notifyProgress(options, 'wechat', 'disable', 'error');
-      throw error;
+    if (shouldDisableOldSubMch(options)) {
+      try {
+        log('查询 5 年内旧启用微信子商户号并禁用');
+        disableResult = await disableOldEnabledWechatMappings(merchantId, newWxSubMchId, {
+          ...options,
+          onGroup: (group) => {
+            const paramsText = Object.entries(group.statusParams)
+                .map(([key, value]) => `${key}=${value}`)
+                .join('&');
+            log(`禁用旧微信子商户号 ${group.wxSubMchId}: ${paramsText}`);
+          },
+        });
+        log(`旧微信子商户号禁用完成，处理 ${disableResult.changedGroups.length} 个分组`);
+        notifyProgress(options, 'wechat', 'disable', 'success');
+      } catch (error) {
+        notifyProgress(options, 'wechat', 'disable', 'error');
+        throw error;
+      }
+    } else {
+      disableResult = { skipped: true, changedGroups: [] };
+      log('未勾选“是否关闭旧子商户号”，已保留旧微信子商户号');
+      notifyProgress(options, 'wechat', 'disable', 'skipped');
     }
 
     let paymentConfigResult = null;
@@ -1827,22 +1837,28 @@
     }
 
     let disableResult;
-    try {
-      log('查询 5 年内旧启用支付宝子商户号并禁用');
-      disableResult = await disableOldEnabledAlipayMappings(merchantId, newZfbSubMchId, {
-        ...options,
-        onGroup: (group) => {
-          const paramsText = Object.entries(group.statusParams)
-              .map(([key, value]) => `${key}=${value}`)
-              .join('&');
-          log(`禁用旧支付宝子商户号 ${group.zfbSubMchId || group.subMchId}: ${paramsText}`);
-        },
-      });
-      log(`旧支付宝子商户号禁用完成，处理 ${disableResult.changedGroups.length} 个分组`);
-      notifyProgress(options, 'alipay', 'disable', 'success');
-    } catch (error) {
-      notifyProgress(options, 'alipay', 'disable', 'error');
-      throw error;
+    if (shouldDisableOldSubMch(options)) {
+      try {
+        log('查询 5 年内旧启用支付宝子商户号并禁用');
+        disableResult = await disableOldEnabledAlipayMappings(merchantId, newZfbSubMchId, {
+          ...options,
+          onGroup: (group) => {
+            const paramsText = Object.entries(group.statusParams)
+                .map(([key, value]) => `${key}=${value}`)
+                .join('&');
+            log(`禁用旧支付宝子商户号 ${group.zfbSubMchId || group.subMchId}: ${paramsText}`);
+          },
+        });
+        log(`旧支付宝子商户号禁用完成，处理 ${disableResult.changedGroups.length} 个分组`);
+        notifyProgress(options, 'alipay', 'disable', 'success');
+      } catch (error) {
+        notifyProgress(options, 'alipay', 'disable', 'error');
+        throw error;
+      }
+    } else {
+      disableResult = { skipped: true, changedGroups: [] };
+      log('未勾选“是否关闭旧子商户号”，已保留旧支付宝子商户号');
+      notifyProgress(options, 'alipay', 'disable', 'skipped');
     }
 
     if (hasWechatPaymentConfigOptions(options)) {
@@ -2077,6 +2093,22 @@
         gap: 8px;
         margin-top: 8px;
       }
+      #syt-auto-report-panel .setting-checkbox {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+        color: #374151;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      #syt-auto-report-panel .setting-checkbox input {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+        accent-color: #2563eb;
+        cursor: pointer;
+      }
       #syt-auto-report-panel .panel-header-main {
         display: flex;
         align-items: center;
@@ -2247,6 +2279,11 @@
         background: #fef3c7;
         border-color: #f59e0b;
       }
+      #syt-auto-report-panel .progress-step.skipped {
+        color: #1e40af;
+        background: #dbeafe;
+        border-color: #93c5fd;
+      }
       #syt-auto-report-panel .progress-step.retryable {
         cursor: pointer;
       }
@@ -2353,6 +2390,10 @@
               <input id="syt-pay-auth-dir" type="text" placeholder="支付授权目录">
             </div>
           </div>
+          <label class="setting-checkbox" for="syt-disable-old-submch">
+            <input id="syt-disable-old-submch" type="checkbox" checked>
+            <span>是否关闭旧子商户号</span>
+          </label>
           <div class="actions">
             <button id="om-auto-report-wechat" type="button">微信重置子商户号</button>
             <button id="om-auto-report-alipay" type="button">支付宝重置子商户号</button>
@@ -2440,6 +2481,7 @@
     const alipayChannelNameInput = panel.querySelector('#syt-alipay-channel-name');
     const appidInput = panel.querySelector('#syt-appid');
     const payAuthDirInput = panel.querySelector('#syt-pay-auth-dir');
+    const disableOldSubMchCheckbox = panel.querySelector('#syt-disable-old-submch');
     const logBox = panel.querySelector('#om-auto-report-log');
     const wechatButton = panel.querySelector('#om-auto-report-wechat');
     const alipayButton = panel.querySelector('#om-auto-report-alipay');
@@ -2499,6 +2541,7 @@
       enableOnlineReceiptButton.disabled = busy;
       openCodePlateTransferButton.disabled = busy;
       merchantClearButton.disabled = busy;
+      disableOldSubMchCheckbox.disabled = busy;
       refreshProgressRetryability('wechat');
       refreshProgressRetryability('alipay');
     };
@@ -2574,6 +2617,7 @@
         sourceName: alipayChannelNameInput.value.trim(),
         subAppids: appidInput.value.trim(),
         jsapiPaths: payAuthDirInput.value.trim(),
+        disableOldSubMch: disableOldSubMchCheckbox.checked,
       };
     };
     const getCopyText = () => {
@@ -2616,7 +2660,7 @@
     const updateRetryContext = (type, step, status) => {
       const context = retryContexts[type];
       if (!context) return;
-      if (status === 'success') {
+      if (status === 'success' || status === 'skipped') {
         context.completedSteps[step] = true;
         if (context.failedStep === step) context.failedStep = null;
       } else if (status === 'error') {
@@ -2628,7 +2672,9 @@
       const context = retryContexts[type];
       if (busy || !context || (step !== 'enable' && step !== 'disable')) return false;
       if (step === 'enable') return context.completedSteps.report && context.failedStep === 'enable';
-      return context.completedSteps.enable && context.failedStep === 'disable';
+      return shouldDisableOldSubMch(context.reportOptions)
+        && context.completedSteps.enable
+        && context.failedStep === 'disable';
     };
     const refreshProgressRetryability = (type) => {
       getProgressContainer(type).querySelectorAll('.progress-step').forEach((stepElement) => {
@@ -2639,6 +2685,8 @@
           stepElement.title = '点击重试此步骤';
         } else if (step === 'report' && stepElement.classList.contains('error')) {
           stepElement.title = '上报失败，请重新执行完整重置';
+        } else if (stepElement.classList.contains('skipped')) {
+          stepElement.title = '已根据设置保留旧子商户号';
         } else {
           stepElement.removeAttribute('title');
         }
@@ -2647,14 +2695,16 @@
     const setProgressStep = (type, step, status) => {
       const target = getProgressContainer(type).querySelector(`[data-step="${step}"]`);
       if (!target) return;
-      target.classList.remove('success', 'error', 'running', 'retryable');
-      if (status === 'success' || status === 'error' || status === 'running') target.classList.add(status);
+      target.classList.remove('success', 'error', 'running', 'skipped', 'retryable');
+      if (status === 'success' || status === 'error' || status === 'running' || status === 'skipped') {
+        target.classList.add(status);
+      }
       updateRetryContext(type, step, status);
       refreshProgressRetryability(type);
     };
     const resetProgress = (type) => {
       getProgressContainer(type).querySelectorAll('.progress-step').forEach((step) => {
-        step.classList.remove('success', 'error', 'running', 'retryable');
+        step.classList.remove('success', 'error', 'running', 'skipped', 'retryable');
         step.removeAttribute('title');
       });
     };
@@ -2712,6 +2762,11 @@
     };
     const retryDisableOldMappings = async (context) => {
       const typeName = getTypeName(context.type);
+      if (!shouldDisableOldSubMch(context.reportOptions)) {
+        setProgressStep(context.type, 'disable', 'skipped');
+        appendLog(`已保留旧${typeName}子商户号，跳过禁用步骤`);
+        return;
+      }
       setProgressStep(context.type, 'disable', 'running');
       appendLog(`开始重试禁用旧${typeName}子商户号`);
       try {
@@ -2762,8 +2817,13 @@
         throw new Error(`启用${typeName}子商户号重试失败: ${error.message}`);
       }
 
-      appendLog(`继续查询并禁用旧${typeName}子商户号`);
-      await retryDisableOldMappings(context);
+      if (shouldDisableOldSubMch(context.reportOptions)) {
+        appendLog(`继续查询并禁用旧${typeName}子商户号`);
+        await retryDisableOldMappings(context);
+      } else {
+        setProgressStep(context.type, 'disable', 'skipped');
+        appendLog(`已保留旧${typeName}子商户号，跳过禁用步骤`);
+      }
       appendLog('重试流程已完成，本次未执行 appid / 支付授权目录绑定');
     };
     const retryProgressStep = async (type, step) => {
