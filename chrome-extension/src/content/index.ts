@@ -149,7 +149,8 @@ function createPanel(api: LegacyApi): void {
     channelId: wxChannelId.value.trim(), channelName: wxChannelName.value.trim(),
     sourcePid: alipayChannelId.value.trim(), sourceName: alipayChannelName.value.trim(),
     subAppids: appids.value.trim(), jsapiPaths: jsapiPaths.value.trim(),
-    disableOldSubMch: true, onLog: log,
+    disableOldSubMch: true,
+    onLog: (message, context) => log(message, context === true),
   });
   const renderResults = (results: MerchantReportResult[]) => {
     latestResults = results;
@@ -261,10 +262,10 @@ function createPanel(api: LegacyApi): void {
       setStatus(resetStatus, useLegacy ? '使用自定义渠道旧流程处理中' : '正在调用批量重置接口');
       log(`开始${useLegacy ? '自定义渠道' : '批量'}重置: ${merchantIds.join('；')}`);
       const results = useLegacy
-        ? await runLegacyReset(api, merchantIds, type, options, log)
+        ? await runLegacyReset(api, merchantIds, type, options, log, renderResults)
         : await runBatchReset(api, merchantIds, type, options, log);
       renderResults(results);
-      const failed = results.filter((item) => item.wechat.state === 'failure' || item.alipay.state === 'failure').length;
+      const failed = results.filter((item) => item.wechat.state === 'failure' || item.alipay.state === 'failure' || item.wechat.error || item.alipay.error).length;
       setStatus(resetStatus, failed ? `处理完成，${failed} 个商户存在失败项` : '处理完成', failed > 0);
       log(failed ? `批次完成，${failed} 个商户存在失败项` : '批次重置完成', failed > 0);
     } catch (error) {

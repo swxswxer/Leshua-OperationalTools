@@ -3,6 +3,7 @@ import type { ReportOptions } from './contracts';
 
 export function channelText(result: ChannelResult): string {
   if (result.state === 'success') return `${result.subMchId}${result.note ? `（${result.note}）` : ''}`;
+  if (result.state === 'pending') return '处理中';
   if (result.state === 'skipped') return '未执行';
   return `失败：${result.error || '未知错误'}`;
 }

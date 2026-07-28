@@ -11,7 +11,8 @@ export interface ReportOptions {
   subAppids: string;
   jsapiPaths: string;
   disableOldSubMch: boolean;
-  onLog?: LogHandler;
+  onLog?: (message: string, context?: unknown) => void;
+  onReportedSubMchId?: (type: 'wechat' | 'alipay', subMchId: string) => void;
 }
 
 export interface CodePlateValues {

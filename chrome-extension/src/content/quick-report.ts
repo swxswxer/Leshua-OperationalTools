@@ -2,7 +2,7 @@ export type ReportType = 'WECHAT' | 'ALIPAY' | 'ALL';
 export type ChannelName = 'wechat' | 'alipay';
 
 export interface ChannelResult {
-  state: 'success' | 'failure' | 'skipped';
+  state: 'pending' | 'success' | 'failure' | 'skipped';
   subMchId?: string;
   error?: string;
   note?: string;
