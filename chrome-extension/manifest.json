@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "收银通运营工具",
+  "version": "1.0.0",
+  "description": "运营后台收银通子商户号重置及辅助工具。",
+  "permissions": [
+    "storage"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://om.leshuazf.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_end",
+      "all_frames": false
+    }
+  ],
+  "host_permissions": ["https://om.leshuazf.com/*"]
+}

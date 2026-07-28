@@ -1,0 +1,42 @@
+#syt-extension-root { position: fixed; top: calc(100vh - 72px); right: 18px; z-index: 2147483647; color: #1f2937; font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
+#syt-extension-root * { box-sizing: border-box; }
+#syt-extension-root .float-ball { display: none; width: 54px; height: 54px; border: 1px solid #93c5fd; border-radius: 50%; color: #fff; background: #1f6feb; box-shadow: 0 10px 24px rgba(15,23,42,.24); cursor: grab; font-weight: 700; touch-action: none; user-select: none; }
+#syt-extension-root .float-ball.dragging { cursor: grabbing; }
+#syt-extension-root.collapsed .float-ball { display: block; }
+#syt-extension-root.collapsed .panel { display: none; }
+#syt-extension-root .panel { position: fixed; right: 18px; bottom: 18px; width: 430px; max-height: calc(100vh - 36px); overflow: auto; background: #fff; border: 1px solid #cbd5e1; box-shadow: 0 14px 36px rgba(15,23,42,.22); }
+#syt-extension-root header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; color: #fff; background: #1f6feb; font-weight: 700; }
+#syt-extension-root header > div { display: flex; align-items: center; gap: 8px; }
+#syt-extension-root main { padding: 12px; }
+#syt-extension-root .view { display: none; }
+#syt-extension-root .view.active { display: block; }
+#syt-extension-root label { display: block; margin: 8px 0; color: #374151; font-weight: 700; }
+#syt-extension-root input, #syt-extension-root select { width: 100%; height: 31px; margin-top: 4px; padding: 4px 8px; color: #111827; background: #fff; border: 1px solid #cbd5e1; border-radius: 0; font: inherit; font-weight: 400; }
+#syt-extension-root button { min-height: 31px; padding: 4px 10px; color: #1d4ed8; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 0; cursor: pointer; font: inherit; }
+#syt-extension-root button:disabled { color: #6b7280; background: #f3f4f6; border-color: #d1d5db; cursor: not-allowed; }
+#syt-extension-root .primary { width: 100%; margin: 10px 0 0; color: #fff; background: #1f6feb; border-color: #1d4ed8; font-weight: 700; }
+#syt-extension-root .icon-button { width: 26px; min-height: 26px; padding: 0; color: #fff; background: transparent; border-color: rgba(255,255,255,.55); }
+#syt-extension-root #syt-back { display: none; }
+#syt-extension-root #syt-back.visible { display: inline-block; }
+#syt-extension-root .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#syt-extension-root .section-title { margin-top: 12px; color: #374151; font-weight: 700; }
+#syt-extension-root .optional-options { margin-top: 8px; }
+#syt-extension-root .optional-options.hidden { display: none; }
+#syt-extension-root .status { min-height: 20px; margin-top: 8px; color: #166534; }
+#syt-extension-root .error { color: #dc2626 !important; font-weight: 700; }
+#syt-extension-root .result-table-wrap { margin-top: 6px; overflow-x: auto; border: 1px solid #e2e8f0; }
+#syt-extension-root table { width: 100%; border-collapse: collapse; font-size: 12px; }
+#syt-extension-root th, #syt-extension-root td { min-width: 88px; padding: 6px; border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; vertical-align: top; word-break: break-word; }
+#syt-extension-root th { background: #f8fafc; color: #475569; text-align: left; }
+#syt-extension-root tr:last-child td { border-bottom: 0; }
+#syt-extension-root th:last-child, #syt-extension-root td:last-child { border-right: 0; }
+#syt-extension-root .empty { color: #64748b; text-align: center; }
+#syt-extension-root .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+#syt-extension-root .actions #syt-copy { grid-column: 1 / -1; }
+#syt-extension-root .shared-tool-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+#syt-extension-root .log { margin-top: 12px; }
+#syt-extension-root .log-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#syt-extension-root #syt-log-preview { min-height: 30px; margin-top: 8px; padding: 6px; overflow: hidden; color: #334155; background: #f8fafc; border: 1px solid #e2e8f0; text-overflow: ellipsis; white-space: nowrap; }
+#syt-extension-root #syt-log-full { display: none; height: 150px; margin: 8px 0 0; padding: 8px; overflow: auto; white-space: pre-wrap; word-break: break-word; background: #f8fafc; border: 1px solid #e2e8f0; }
+#syt-extension-root.log-open #syt-log-full { display: block; }
+@media (max-width: 520px) { #syt-extension-root { right: 8px; } #syt-extension-root .panel { right: 8px; bottom: 8px; width: min(430px, calc(100vw - 16px)); } }
