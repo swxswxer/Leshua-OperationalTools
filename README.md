@@ -2,6 +2,34 @@
 
 运营后台脚本集合，用于在 `https://om.leshuazf.com/` 自动重置微信/支付宝子商户号。
 
+## 收银通 Chrome 插件
+
+`chrome-extension/` 是独立的 Manifest V3 收银通运营工具，使用 TypeScript 和原生 HTML/CSS 编写。它与现有油猴脚本并存，第一版版本号为 `1.0.0`；油猴脚本未被删除或改写。
+
+构建并在 Chrome 中加载：
+
+```bash
+cd chrome-extension
+npm install
+npm run typecheck
+npm test
+npm run build
+```
+
+打开 `chrome://extensions`，开启“开发者模式”，点击“加载已解压的扩展程序”，选择本项目的 [`chrome-extension/dist`](/Users/swxswx/Desktop/work/code/Report-Tampermonkey/chrome-extension/dist) 目录。扩展仅会在 `https://om.leshuazf.com/*` 页面注入工具，并沿用当前后台的登录态。
+
+插件重置页支持 1 至 5 个 10 位乐刷商户号，以英文分号 `;` 分隔。未填写自定义渠道时，调用批量接口完成上报、启用和关闭旧号；填写任一自定义渠道后，所选通道会回退为原收银通流程并逐商户执行。批量结果按输入顺序展示，复制文本会同时保留成功子商户号、失败原因和未执行通道。
+
+插件将“配置商户 key”和“开通在线收款单”放在重置页，与乐刷商户号输入框共用，只允许一次处理一个商户；“码牌划转”“防切户白名单”仍为独立工具页。Chrome 插件运行在隔离的内容脚本环境，不向页面控制台暴露 `sytAutoReport` 等 API。
+
+插件源码按功能拆分，维护时优先在 [`chrome-extension/src/tools`](/Users/swxswx/Desktop/work/code/Report-Tampermonkey/chrome-extension/src/tools) 找对应业务：
+
+- `batch-reset.ts`：新批量重置接口与微信支付参数绑定。
+- `legacy-reset.ts`：填写自定义渠道后使用的旧收银通重置流程。
+- `merchant-key.ts`、`online-receipt.ts`、`code-plate-transfer.ts`、`change-whitelist.ts`：四个独立辅助工具。
+- `content/index.ts`：只负责悬浮窗、页面切换、表单取值与结果展示。
+- `content/contracts.ts`、`content/helpers.ts`：共享类型和通用函数。
+
 当前包含两条业务线：
 
 | 业务线 | 脚本文件 | 当前版本 | 控制台对象 | 悬浮球位置 |

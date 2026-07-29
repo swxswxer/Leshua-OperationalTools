@@ -79,6 +79,7 @@
   // src/content/helpers.ts
   function channelText(result) {
     if (result.state === "success") return `${result.subMchId}${result.note ? `\uFF08${result.note}\uFF09` : ""}`;
+    if (result.state === "pending") return "\u5904\u7406\u4E2D";
     if (result.state === "skipped") return "\u672A\u6267\u884C";
     return `\u5931\u8D25\uFF1A${result.error || "\u672A\u77E5\u9519\u8BEF"}`;
   }
@@ -140,33 +141,75 @@
   }
 
   // src/tools/legacy-reset.ts
-  async function runLegacyReset(api, merchantIds, reportType, options, log) {
+  function pendingChannel() {
+    return { state: "pending" };
+  }
+  function completeChannel(result, channel, subMchId, onUpdate) {
+    result[channel] = { state: "success", subMchId };
+    onUpdate([result]);
+  }
+  function failChannel(result, channel, error, onUpdate) {
+    const message = error instanceof Error ? error.message : String(error);
+    const current = result[channel];
+    if (current.state === "success" && current.subMchId) {
+      result[channel] = {
+        ...current,
+        error: message,
+        note: `\u540E\u7EED\u6D41\u7A0B\u5931\u8D25\uFF1A${message}`
+      };
+    } else {
+      result[channel] = { state: "failure", error: message };
+    }
+    onUpdate([result]);
+  }
+  async function runLegacyReset(api, merchantIds, reportType, options, log, onResultUpdate) {
     const output = [];
     for (const merchantId of merchantIds) {
       const result = {
         merchantId,
         route: "legacy",
-        wechat: skippedChannel(),
-        alipay: skippedChannel()
+        wechat: isRequested(reportType, "wechat") ? pendingChannel() : skippedChannel(),
+        alipay: isRequested(reportType, "alipay") ? pendingChannel() : skippedChannel()
       };
+      output.push(result);
       log(`\u5546\u6237 ${merchantId} \u4F7F\u7528\u81EA\u5B9A\u4E49\u6E20\u9053\u65E7\u6D41\u7A0B\u5904\u7406`);
-      if (isRequested(reportType, "wechat")) {
-        try {
-          const response = await api.wechatAutoReport(merchantId, options);
-          result.wechat = { state: "success", subMchId: response.newWxSubMchId };
-        } catch (error) {
-          result.wechat = { state: "failure", error: error instanceof Error ? error.message : String(error) };
+      const reportOptions = {
+        ...options,
+        onReportedSubMchId: (type, subMchId) => {
+          if (type === "wechat" && isRequested(reportType, "wechat")) {
+            completeChannel(result, "wechat", subMchId, () => onResultUpdate([...output]));
+          }
+          if (type === "alipay" && isRequested(reportType, "alipay")) {
+            completeChannel(result, "alipay", subMchId, () => onResultUpdate([...output]));
+          }
         }
+      };
+      const tasks = [];
+      if (isRequested(reportType, "wechat")) {
+        tasks.push((async () => {
+          try {
+            const response = await api.wechatAutoReport(merchantId, reportOptions);
+            if (result.wechat.state !== "success") {
+              completeChannel(result, "wechat", response.newWxSubMchId, () => onResultUpdate([...output]));
+            }
+          } catch (error) {
+            failChannel(result, "wechat", error, () => onResultUpdate([...output]));
+          }
+        })());
       }
       if (isRequested(reportType, "alipay")) {
-        try {
-          const response = await api.alipayAutoReport(merchantId, options);
-          result.alipay = { state: "success", subMchId: response.newZfbSubMchId };
-        } catch (error) {
-          result.alipay = { state: "failure", error: error instanceof Error ? error.message : String(error) };
-        }
+        tasks.push((async () => {
+          try {
+            const response = await api.alipayAutoReport(merchantId, reportOptions);
+            if (result.alipay.state !== "success") {
+              completeChannel(result, "alipay", response.newZfbSubMchId, () => onResultUpdate([...output]));
+            }
+          } catch (error) {
+            failChannel(result, "alipay", error, () => onResultUpdate([...output]));
+          }
+        })());
       }
-      output.push(result);
+      await Promise.all(tasks);
     }
     return output;
   }
@@ -3489,7 +3532,7 @@
       subAppids: appids.value.trim(),
       jsapiPaths: jsapiPaths.value.trim(),
       disableOldSubMch: true,
-      onLog: log
+      onLog: (message, context) => log(message, context === true)
     });
     const renderResults = (results) => {
       latestResults = results;
@@ -3607,9 +3650,9 @@
         const useLegacy = hasCustomChannel(options);
         setStatus(resetStatus, useLegacy ? "\u4F7F\u7528\u81EA\u5B9A\u4E49\u6E20\u9053\u65E7\u6D41\u7A0B\u5904\u7406\u4E2D" : "\u6B63\u5728\u8C03\u7528\u6279\u91CF\u91CD\u7F6E\u63A5\u53E3");
         log(`\u5F00\u59CB${useLegacy ? "\u81EA\u5B9A\u4E49\u6E20\u9053" : "\u6279\u91CF"}\u91CD\u7F6E: ${merchantIds.join("\uFF1B")}`);
-        const results = useLegacy ? await runLegacyReset(api, merchantIds, type, options, log) : await runBatchReset(api, merchantIds, type, options, log);
+        const results = useLegacy ? await runLegacyReset(api, merchantIds, type, options, log, renderResults) : await runBatchReset(api, merchantIds, type, options, log);
         renderResults(results);
-        const failed = results.filter((item) => item.wechat.state === "failure" || item.alipay.state === "failure").length;
+        const failed = results.filter((item) => item.wechat.state === "failure" || item.alipay.state === "failure" || item.wechat.error || item.alipay.error).length;
         setStatus(resetStatus, failed ? `\u5904\u7406\u5B8C\u6210\uFF0C${failed} \u4E2A\u5546\u6237\u5B58\u5728\u5931\u8D25\u9879` : "\u5904\u7406\u5B8C\u6210", failed > 0);
         log(failed ? `\u6279\u6B21\u5B8C\u6210\uFF0C${failed} \u4E2A\u5546\u6237\u5B58\u5728\u5931\u8D25\u9879` : "\u6279\u6B21\u91CD\u7F6E\u5B8C\u6210", failed > 0);
       } catch (error) {
