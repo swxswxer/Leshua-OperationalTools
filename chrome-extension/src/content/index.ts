@@ -48,10 +48,13 @@ function byId<T extends HTMLElement>(root: ParentNode, id: string): T {
 }
 
 function copyResultText(results: MerchantReportResult[]): string {
-  return results.map((result) => [
-    `乐刷商户号${result.merchantId}`,
-    `微信子商户号:${channelText(result.wechat)} 支付宝子商户号:${channelText(result.alipay)}`,
-  ].join('\n')).join('\n');
+  return results.map((result) => {
+    const channels = [
+      result.wechat.state !== 'skipped' ? `微信子商户号:${channelText(result.wechat)}` : '',
+      result.alipay.state !== 'skipped' ? `支付宝子商户号:${channelText(result.alipay)}` : '',
+    ].filter(Boolean);
+    return [`乐刷商户号${result.merchantId}`, channels.join(' ')].join('\n');
+  }).join('\n');
 }
 
 function createPanel(api: LegacyApi): void {

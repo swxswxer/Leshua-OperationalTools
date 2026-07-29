@@ -3432,10 +3432,13 @@
     return element;
   }
   function copyResultText(results) {
-    return results.map((result) => [
-      `\u4E50\u5237\u5546\u6237\u53F7${result.merchantId}`,
-      `\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7:${channelText(result.wechat)} \u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7:${channelText(result.alipay)}`
-    ].join("\n")).join("\n");
+    return results.map((result) => {
+      const channels = [
+        result.wechat.state !== "skipped" ? `\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7:${channelText(result.wechat)}` : "",
+        result.alipay.state !== "skipped" ? `\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7:${channelText(result.alipay)}` : ""
+      ].filter(Boolean);
+      return [`\u4E50\u5237\u5546\u6237\u53F7${result.merchantId}`, channels.join(" ")].join("\n");
+    }).join("\n");
   }
   function createPanel(api) {
     document.getElementById("syt-auto-report-panel")?.remove();
