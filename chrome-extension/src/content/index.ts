@@ -11,6 +11,7 @@ import { configureMerchantKey } from '../tools/merchant-key';
 import { enableOnlineReceipt } from '../tools/online-receipt';
 import { transferCodePlates } from '../tools/code-plate-transfer';
 import { addChangeWhitelist } from '../tools/change-whitelist';
+import { queryNewDeviceAgent, queryOldDeviceAgent, submitDeviceTransfer, type DeviceTransferValues } from '../tools/device-transfer';
 
 // The existing userscript is bundled locally so its verified auxiliary-tool APIs
 // can be reused during the first extension release. It runs only in this
@@ -78,9 +79,10 @@ function createPanel(api: LegacyApi): void {
           <div class="shared-tool-actions"><button id="syt-run-key" type="button">配置商户 key</button><button id="syt-run-receipt" type="button">开通在线收款单</button></div>
           <div id="syt-reset-status" class="status"></div>
           <div class="section-title">本次重置结果</div><div class="result-table-wrap"><table><thead><tr><th>乐刷商户号</th><th>微信子商户号</th><th>支付宝子商户号</th><th>方式</th></tr></thead><tbody id="syt-results"><tr><td colspan="4" class="empty">执行后显示结果</td></tr></tbody></table></div>
-          <div class="actions"><button id="syt-copy" type="button" disabled>复制结果</button><button class="nav-tool" data-view="code" type="button">码牌划转</button><button class="nav-tool" data-view="whitelist" type="button">防切户白名单</button></div>
+          <div class="actions"><button id="syt-copy" type="button" disabled>复制结果</button><button class="nav-tool" data-view="code" type="button">码牌划转</button><button class="nav-tool" data-view="device" type="button">机具划拨</button><button class="nav-tool" data-view="whitelist" type="button">防切户白名单</button></div>
         </section>
         <section id="syt-view-code" class="view"><div class="form-row"><label>码牌开始编号<input id="syt-code-start" autocomplete="off"></label><label>码牌结束编号<input id="syt-code-end" autocomplete="off"></label></div><div class="form-row"><label>原代理商<input id="syt-code-source" autocomplete="off"></label><label>新代理商<input id="syt-code-target" autocomplete="off"></label></div><button id="syt-run-code" class="primary" type="button">确认划转</button><div id="syt-code-status" class="status"></div></section>
+        <section id="syt-view-device" class="view"><div class="section-title">机具信息</div><div class="form-row"><label>乐刷 SN 始<input id="syt-device-sn" autocomplete="off"></label><label>数量<input id="syt-device-quantity" value="1" readonly></label></div><button id="syt-device-query-old" type="button">查询旧代理商</button><div class="section-title">旧代理商</div><label>旧代理商编号<input id="syt-device-old-id" readonly></label><label>旧代理商名称<input id="syt-device-old-name" readonly></label><label>旧代理商类型<input id="syt-device-old-type" readonly></label><div class="section-title">新代理商</div><label>新代理商编号<input id="syt-device-new-id" autocomplete="off"></label><label>新代理商名称<input id="syt-device-new-name" readonly></label><label>新代理商类型<input id="syt-device-new-type" readonly></label><button id="syt-run-device" class="primary" type="button">确认划拨</button><div id="syt-device-status" class="status"></div></section>
         <section id="syt-view-whitelist" class="view"><div class="form-row"><label>手机号<input id="syt-white-mobile" autocomplete="off"></label><label>身份证号<input id="syt-white-id" autocomplete="off"></label></div><div class="form-row"><label>营业执照号<input id="syt-white-license" autocomplete="off"></label><label>结算账号<input id="syt-white-account" autocomplete="off"></label></div><button id="syt-run-whitelist" class="primary" type="button">添加防切户白名单</button><div id="syt-white-status" class="status"></div></section>
         <section class="log"><div class="log-actions"><button id="syt-log-toggle" type="button">展开日志</button><button id="syt-log-clear" type="button">清空日志</button></div><div id="syt-log-preview">等待执行</div><pre id="syt-log-full"></pre></section>
       </main>
@@ -184,7 +186,7 @@ function createPanel(api: LegacyApi): void {
   const showView = (name: string) => {
     root.querySelectorAll<HTMLElement>('.view').forEach((view) => view.classList.toggle('active', view.id === `syt-view-${name}`));
     backButton.classList.toggle('visible', name !== 'reset');
-    title.textContent = `${name === 'reset' ? '收银通运营工具' : ({ code: '码牌划转', whitelist: '防切户白名单' } as Record<string, string>)[name]} v${VERSION}`;
+    title.textContent = `${name === 'reset' ? '收银通运营工具' : ({ code: '码牌划转', device: '机具划拨', whitelist: '防切户白名单' } as Record<string, string>)[name]} v${VERSION}`;
   };
   const applyPreset = () => {
     const option = PRESETS[Number(preset.value)] || PRESETS[0];
@@ -305,6 +307,110 @@ function createPanel(api: LegacyApi): void {
     const status = byId<HTMLElement>(root, 'syt-code-status');
     const values: CodePlateValues = { startCode: byId<HTMLInputElement>(root, 'syt-code-start').value.trim(), endCode: byId<HTMLInputElement>(root, 'syt-code-end').value.trim(), sourceAgent: byId<HTMLInputElement>(root, 'syt-code-source').value.trim(), targetAgent: byId<HTMLInputElement>(root, 'syt-code-target').value.trim() };
     try { setStatus(status, '处理中...'); await transferCodePlates(api, values, log, (_state, message) => setStatus(status, message)); setStatus(status, '码牌划转完成'); } catch (error) { setStatus(status, error instanceof Error ? error.message : String(error), true); }
+  });
+  const deviceSn = byId<HTMLInputElement>(root, 'syt-device-sn');
+  const deviceOldId = byId<HTMLInputElement>(root, 'syt-device-old-id');
+  const deviceOldName = byId<HTMLInputElement>(root, 'syt-device-old-name');
+  const deviceOldType = byId<HTMLInputElement>(root, 'syt-device-old-type');
+  const deviceNewId = byId<HTMLInputElement>(root, 'syt-device-new-id');
+  const deviceNewName = byId<HTMLInputElement>(root, 'syt-device-new-name');
+  const deviceNewType = byId<HTMLInputElement>(root, 'syt-device-new-type');
+  const deviceQueryOld = byId<HTMLButtonElement>(root, 'syt-device-query-old');
+  const deviceSubmit = byId<HTMLButtonElement>(root, 'syt-run-device');
+  const deviceStatus = byId<HTMLElement>(root, 'syt-device-status');
+  let deviceBusy = false;
+  let oldAgentLookupKey = '';
+  let newAgentLookupKey = '';
+  const deviceValues = (): DeviceTransferValues => ({
+    sn: deviceSn.value.trim(),
+    quantity: '1',
+    oldAgentId: deviceOldId.value.trim(),
+    oldAgentName: deviceOldName.value.trim(),
+    oldAgentType: deviceOldType.value.trim(),
+    newAgentId: deviceNewId.value.trim(),
+    newAgentName: deviceNewName.value.trim(),
+    newAgentType: deviceNewType.value.trim(),
+  });
+  const setDeviceBusy = (next: boolean) => {
+    deviceBusy = next;
+    deviceQueryOld.disabled = next;
+    deviceSubmit.disabled = next;
+    deviceSn.disabled = next;
+    deviceNewId.disabled = next;
+  };
+  const clearNewAgent = () => {
+    deviceNewName.value = '';
+    deviceNewType.value = '';
+    newAgentLookupKey = '';
+  };
+  const clearOldAgent = () => {
+    deviceOldId.value = '';
+    deviceOldName.value = '';
+    deviceOldType.value = '';
+    oldAgentLookupKey = '';
+    clearNewAgent();
+  };
+  const loadOldAgent = async () => {
+    const sn = deviceSn.value.trim();
+    clearOldAgent();
+    const agent = await queryOldDeviceAgent(sn);
+    deviceOldId.value = agent.id;
+    deviceOldName.value = agent.name;
+    deviceOldType.value = agent.type;
+    oldAgentLookupKey = sn;
+    log(`机具 ${sn} 的旧代理商: ${agent.id} ${agent.name}`);
+  };
+  const loadNewAgent = async () => {
+    const sn = deviceSn.value.trim();
+    if (oldAgentLookupKey !== sn) await loadOldAgent();
+    const newAgentId = deviceNewId.value.trim();
+    clearNewAgent();
+    const agent = await queryNewDeviceAgent(sn, deviceOldId.value, newAgentId);
+    deviceNewName.value = agent.name;
+    deviceNewType.value = agent.type;
+    newAgentLookupKey = `${sn}|${deviceOldId.value}|${newAgentId}`;
+    log(`机具 ${sn} 的新代理商: ${agent.id} ${agent.name}`);
+  };
+  const runDeviceLookup = (label: string, runner: () => Promise<void>) => async () => {
+    if (deviceBusy) return;
+    setDeviceBusy(true);
+    try {
+      setStatus(deviceStatus, `${label}中...`);
+      await runner();
+      setStatus(deviceStatus, `${label}完成`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(deviceStatus, message, true);
+      log(`${label}失败: ${message}`, true);
+    } finally {
+      setDeviceBusy(false);
+    }
+  };
+  deviceQueryOld.addEventListener('click', runDeviceLookup('查询旧代理商', loadOldAgent));
+  deviceSn.addEventListener('change', runDeviceLookup('查询旧代理商', loadOldAgent));
+  deviceNewId.addEventListener('change', runDeviceLookup('查询新代理商', loadNewAgent));
+  deviceSubmit.addEventListener('click', async () => {
+    if (deviceBusy) return;
+    setDeviceBusy(true);
+    try {
+      const sn = deviceSn.value.trim();
+      if (oldAgentLookupKey !== sn) await loadOldAgent();
+      const newKey = `${sn}|${deviceOldId.value}|${deviceNewId.value.trim()}`;
+      if (newAgentLookupKey !== newKey) await loadNewAgent();
+      setStatus(deviceStatus, '正在校验划拨条件...');
+      await submitDeviceTransfer(deviceValues(), (message) => {
+        setStatus(deviceStatus, message);
+        log(message);
+      });
+      setStatus(deviceStatus, '机具划拨成功');
+      log(`机具 ${sn} 划拨成功`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(deviceStatus, `机具划拨失败: ${message}`, true);
+      log(`机具划拨失败: ${message}`, true);
+    } finally {
+      setDeviceBusy(false);
+    }
   });
   byId<HTMLButtonElement>(root, 'syt-run-whitelist').addEventListener('click', async () => {
     const status = byId<HTMLElement>(root, 'syt-white-status');

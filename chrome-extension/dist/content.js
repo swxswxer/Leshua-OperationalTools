@@ -238,6 +238,86 @@
     await api.addMerchantChangeWhitelist(values, { onLog: log, onStatus });
   }
 
+  // src/tools/device-transfer.ts
+  var ENDPOINT = "/base-business/pinpad/newTerminal.do";
+  function trim(value) {
+    return value.trim();
+  }
+  function assertSuccess(payload) {
+    if (Number(payload?.code) === 0 && payload?.success === true) return payload.data;
+    throw new Error(payload?.msg || "\u540E\u53F0\u672A\u8FD4\u56DE\u6210\u529F\u7ED3\u679C");
+  }
+  async function request(method, values, fetchImpl = fetch) {
+    const body = new URLSearchParams(values);
+    const response = await fetchImpl(`${ENDPOINT}?method=${encodeURIComponent(method)}`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: "application/json, text/javascript, */*; q=0.01",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      body
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`\u8BF7\u6C42\u5931\u8D25 ${response.status}: ${text.slice(0, 200)}`);
+    try {
+      return assertSuccess(JSON.parse(text));
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new Error(`\u63A5\u53E3\u8FD4\u56DE\u975E JSON \u5185\u5BB9: ${text.slice(0, 200)}`);
+      throw error;
+    }
+  }
+  function toAgent(data, id) {
+    const name = trim(String(data?.agentName || ""));
+    const type = trim(String(data?.agentClassName || ""));
+    if (!name || !type) throw new Error("\u63A5\u53E3\u672A\u8FD4\u56DE\u5B8C\u6574\u4EE3\u7406\u5546\u4FE1\u606F");
+    return { id, name, type };
+  }
+  function validateDeviceTransfer(values) {
+    if (!trim(values.sn)) throw new Error("\u8BF7\u8F93\u5165\u4E50\u5237 SN \u59CB");
+    if (values.quantity !== "1") throw new Error("\u673A\u5177\u5212\u62E8\u6570\u91CF\u56FA\u5B9A\u4E3A 1");
+    if (!trim(values.oldAgentId) || !trim(values.newAgentId)) throw new Error("\u8BF7\u5148\u67E5\u8BE2\u65E7\u4EE3\u7406\u5546\u548C\u65B0\u4EE3\u7406\u5546\u4FE1\u606F");
+    if (trim(values.oldAgentId) === trim(values.newAgentId)) throw new Error("\u65B0\u65E7\u4EE3\u7406\u5546\u7F16\u53F7\u4E0D\u80FD\u76F8\u540C");
+  }
+  async function queryOldDeviceAgent(sn, fetchImpl = fetch) {
+    const deviceSn = trim(sn);
+    if (!deviceSn) throw new Error("\u8BF7\u8F93\u5165\u4E50\u5237 SN \u59CB");
+    const data = await request("changeAgentCheckSn", {
+      pinpadUuidStart: deviceSn,
+      pinpadUuidTotal: "1"
+    }, fetchImpl);
+    const id = trim(String(data?.oldAgentId || ""));
+    if (!id) throw new Error("\u63A5\u53E3\u672A\u8FD4\u56DE\u65E7\u4EE3\u7406\u5546\u7F16\u53F7");
+    return toAgent(data, id);
+  }
+  async function queryNewDeviceAgent(sn, oldAgentId, newAgentId, fetchImpl = fetch) {
+    const deviceSn = trim(sn);
+    const oldId = trim(oldAgentId);
+    const newId = trim(newAgentId);
+    if (!deviceSn || !oldId || !newId) throw new Error("\u8BF7\u5148\u586B\u5199 SN\u3001\u65B0\u4EE3\u7406\u5546\u7F16\u53F7\u5E76\u67E5\u8BE2\u65E7\u4EE3\u7406\u5546");
+    const data = await request("changeAgentCheckAgent", {
+      pinpadUuid: deviceSn,
+      oldAgentId: oldId,
+      newAgentId: newId
+    }, fetchImpl);
+    return toAgent(data, newId);
+  }
+  var wait = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+  async function submitDeviceTransfer(values, onStep, fetchImpl = fetch) {
+    validateDeviceTransfer(values);
+    const requestValues = {
+      pinpadUuidStart: trim(values.sn),
+      pinpadUuidTotal: "1",
+      oldAgentId: trim(values.oldAgentId),
+      newAgentId: trim(values.newAgentId)
+    };
+    await request("changeAgentBeforeSubmit", requestValues, fetchImpl);
+    onStep?.("\u6821\u9A8C\u901A\u8FC7\uFF0C0.5 \u79D2\u540E\u53D1\u8D77\u6B63\u5F0F\u5212\u62E8");
+    await wait(500);
+    await request("changeAgent", requestValues, fetchImpl);
+  }
+
   // ../syt-submch-reset.user.js
   (function() {
     "use strict";
@@ -3460,9 +3540,10 @@
           <div class="shared-tool-actions"><button id="syt-run-key" type="button">\u914D\u7F6E\u5546\u6237 key</button><button id="syt-run-receipt" type="button">\u5F00\u901A\u5728\u7EBF\u6536\u6B3E\u5355</button></div>
           <div id="syt-reset-status" class="status"></div>
           <div class="section-title">\u672C\u6B21\u91CD\u7F6E\u7ED3\u679C</div><div class="result-table-wrap"><table><thead><tr><th>\u4E50\u5237\u5546\u6237\u53F7</th><th>\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7</th><th>\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7</th><th>\u65B9\u5F0F</th></tr></thead><tbody id="syt-results"><tr><td colspan="4" class="empty">\u6267\u884C\u540E\u663E\u793A\u7ED3\u679C</td></tr></tbody></table></div>
-          <div class="actions"><button id="syt-copy" type="button" disabled>\u590D\u5236\u7ED3\u679C</button><button class="nav-tool" data-view="code" type="button">\u7801\u724C\u5212\u8F6C</button><button class="nav-tool" data-view="whitelist" type="button">\u9632\u5207\u6237\u767D\u540D\u5355</button></div>
+          <div class="actions"><button id="syt-copy" type="button" disabled>\u590D\u5236\u7ED3\u679C</button><button class="nav-tool" data-view="code" type="button">\u7801\u724C\u5212\u8F6C</button><button class="nav-tool" data-view="device" type="button">\u673A\u5177\u5212\u62E8</button><button class="nav-tool" data-view="whitelist" type="button">\u9632\u5207\u6237\u767D\u540D\u5355</button></div>
         </section>
         <section id="syt-view-code" class="view"><div class="form-row"><label>\u7801\u724C\u5F00\u59CB\u7F16\u53F7<input id="syt-code-start" autocomplete="off"></label><label>\u7801\u724C\u7ED3\u675F\u7F16\u53F7<input id="syt-code-end" autocomplete="off"></label></div><div class="form-row"><label>\u539F\u4EE3\u7406\u5546<input id="syt-code-source" autocomplete="off"></label><label>\u65B0\u4EE3\u7406\u5546<input id="syt-code-target" autocomplete="off"></label></div><button id="syt-run-code" class="primary" type="button">\u786E\u8BA4\u5212\u8F6C</button><div id="syt-code-status" class="status"></div></section>
+        <section id="syt-view-device" class="view"><div class="section-title">\u673A\u5177\u4FE1\u606F</div><div class="form-row"><label>\u4E50\u5237 SN \u59CB<input id="syt-device-sn" autocomplete="off"></label><label>\u6570\u91CF<input id="syt-device-quantity" value="1" readonly></label></div><button id="syt-device-query-old" type="button">\u67E5\u8BE2\u65E7\u4EE3\u7406\u5546</button><div class="section-title">\u65E7\u4EE3\u7406\u5546</div><label>\u65E7\u4EE3\u7406\u5546\u7F16\u53F7<input id="syt-device-old-id" readonly></label><label>\u65E7\u4EE3\u7406\u5546\u540D\u79F0<input id="syt-device-old-name" readonly></label><label>\u65E7\u4EE3\u7406\u5546\u7C7B\u578B<input id="syt-device-old-type" readonly></label><div class="section-title">\u65B0\u4EE3\u7406\u5546</div><label>\u65B0\u4EE3\u7406\u5546\u7F16\u53F7<input id="syt-device-new-id" autocomplete="off"></label><label>\u65B0\u4EE3\u7406\u5546\u540D\u79F0<input id="syt-device-new-name" readonly></label><label>\u65B0\u4EE3\u7406\u5546\u7C7B\u578B<input id="syt-device-new-type" readonly></label><button id="syt-run-device" class="primary" type="button">\u786E\u8BA4\u5212\u62E8</button><div id="syt-device-status" class="status"></div></section>
         <section id="syt-view-whitelist" class="view"><div class="form-row"><label>\u624B\u673A\u53F7<input id="syt-white-mobile" autocomplete="off"></label><label>\u8EAB\u4EFD\u8BC1\u53F7<input id="syt-white-id" autocomplete="off"></label></div><div class="form-row"><label>\u8425\u4E1A\u6267\u7167\u53F7<input id="syt-white-license" autocomplete="off"></label><label>\u7ED3\u7B97\u8D26\u53F7<input id="syt-white-account" autocomplete="off"></label></div><button id="syt-run-whitelist" class="primary" type="button">\u6DFB\u52A0\u9632\u5207\u6237\u767D\u540D\u5355</button><div id="syt-white-status" class="status"></div></section>
         <section class="log"><div class="log-actions"><button id="syt-log-toggle" type="button">\u5C55\u5F00\u65E5\u5FD7</button><button id="syt-log-clear" type="button">\u6E05\u7A7A\u65E5\u5FD7</button></div><div id="syt-log-preview">\u7B49\u5F85\u6267\u884C</div><pre id="syt-log-full"></pre></section>
       </main>
@@ -3566,7 +3647,7 @@
     const showView = (name) => {
       root.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === `syt-view-${name}`));
       backButton.classList.toggle("visible", name !== "reset");
-      title.textContent = `${name === "reset" ? "\u6536\u94F6\u901A\u8FD0\u8425\u5DE5\u5177" : { code: "\u7801\u724C\u5212\u8F6C", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name]} v${VERSION}`;
+      title.textContent = `${name === "reset" ? "\u6536\u94F6\u901A\u8FD0\u8425\u5DE5\u5177" : { code: "\u7801\u724C\u5212\u8F6C", device: "\u673A\u5177\u5212\u62E8", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name]} v${VERSION}`;
     };
     const applyPreset = () => {
       const option = PRESETS[Number(preset.value)] || PRESETS[0];
@@ -3696,6 +3777,110 @@
         setStatus(status, "\u7801\u724C\u5212\u8F6C\u5B8C\u6210");
       } catch (error) {
         setStatus(status, error instanceof Error ? error.message : String(error), true);
+      }
+    });
+    const deviceSn = byId(root, "syt-device-sn");
+    const deviceOldId = byId(root, "syt-device-old-id");
+    const deviceOldName = byId(root, "syt-device-old-name");
+    const deviceOldType = byId(root, "syt-device-old-type");
+    const deviceNewId = byId(root, "syt-device-new-id");
+    const deviceNewName = byId(root, "syt-device-new-name");
+    const deviceNewType = byId(root, "syt-device-new-type");
+    const deviceQueryOld = byId(root, "syt-device-query-old");
+    const deviceSubmit = byId(root, "syt-run-device");
+    const deviceStatus = byId(root, "syt-device-status");
+    let deviceBusy = false;
+    let oldAgentLookupKey = "";
+    let newAgentLookupKey = "";
+    const deviceValues = () => ({
+      sn: deviceSn.value.trim(),
+      quantity: "1",
+      oldAgentId: deviceOldId.value.trim(),
+      oldAgentName: deviceOldName.value.trim(),
+      oldAgentType: deviceOldType.value.trim(),
+      newAgentId: deviceNewId.value.trim(),
+      newAgentName: deviceNewName.value.trim(),
+      newAgentType: deviceNewType.value.trim()
+    });
+    const setDeviceBusy = (next) => {
+      deviceBusy = next;
+      deviceQueryOld.disabled = next;
+      deviceSubmit.disabled = next;
+      deviceSn.disabled = next;
+      deviceNewId.disabled = next;
+    };
+    const clearNewAgent = () => {
+      deviceNewName.value = "";
+      deviceNewType.value = "";
+      newAgentLookupKey = "";
+    };
+    const clearOldAgent = () => {
+      deviceOldId.value = "";
+      deviceOldName.value = "";
+      deviceOldType.value = "";
+      oldAgentLookupKey = "";
+      clearNewAgent();
+    };
+    const loadOldAgent = async () => {
+      const sn = deviceSn.value.trim();
+      clearOldAgent();
+      const agent = await queryOldDeviceAgent(sn);
+      deviceOldId.value = agent.id;
+      deviceOldName.value = agent.name;
+      deviceOldType.value = agent.type;
+      oldAgentLookupKey = sn;
+      log(`\u673A\u5177 ${sn} \u7684\u65E7\u4EE3\u7406\u5546: ${agent.id} ${agent.name}`);
+    };
+    const loadNewAgent = async () => {
+      const sn = deviceSn.value.trim();
+      if (oldAgentLookupKey !== sn) await loadOldAgent();
+      const newAgentId = deviceNewId.value.trim();
+      clearNewAgent();
+      const agent = await queryNewDeviceAgent(sn, deviceOldId.value, newAgentId);
+      deviceNewName.value = agent.name;
+      deviceNewType.value = agent.type;
+      newAgentLookupKey = `${sn}|${deviceOldId.value}|${newAgentId}`;
+      log(`\u673A\u5177 ${sn} \u7684\u65B0\u4EE3\u7406\u5546: ${agent.id} ${agent.name}`);
+    };
+    const runDeviceLookup = (label, runner) => async () => {
+      if (deviceBusy) return;
+      setDeviceBusy(true);
+      try {
+        setStatus(deviceStatus, `${label}\u4E2D...`);
+        await runner();
+        setStatus(deviceStatus, `${label}\u5B8C\u6210`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setStatus(deviceStatus, message, true);
+        log(`${label}\u5931\u8D25: ${message}`, true);
+      } finally {
+        setDeviceBusy(false);
+      }
+    };
+    deviceQueryOld.addEventListener("click", runDeviceLookup("\u67E5\u8BE2\u65E7\u4EE3\u7406\u5546", loadOldAgent));
+    deviceSn.addEventListener("change", runDeviceLookup("\u67E5\u8BE2\u65E7\u4EE3\u7406\u5546", loadOldAgent));
+    deviceNewId.addEventListener("change", runDeviceLookup("\u67E5\u8BE2\u65B0\u4EE3\u7406\u5546", loadNewAgent));
+    deviceSubmit.addEventListener("click", async () => {
+      if (deviceBusy) return;
+      setDeviceBusy(true);
+      try {
+        const sn = deviceSn.value.trim();
+        if (oldAgentLookupKey !== sn) await loadOldAgent();
+        const newKey = `${sn}|${deviceOldId.value}|${deviceNewId.value.trim()}`;
+        if (newAgentLookupKey !== newKey) await loadNewAgent();
+        setStatus(deviceStatus, "\u6B63\u5728\u6821\u9A8C\u5212\u62E8\u6761\u4EF6...");
+        await submitDeviceTransfer(deviceValues(), (message) => {
+          setStatus(deviceStatus, message);
+          log(message);
+        });
+        setStatus(deviceStatus, "\u673A\u5177\u5212\u62E8\u6210\u529F");
+        log(`\u673A\u5177 ${sn} \u5212\u62E8\u6210\u529F`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setStatus(deviceStatus, `\u673A\u5177\u5212\u62E8\u5931\u8D25: ${message}`, true);
+        log(`\u673A\u5177\u5212\u62E8\u5931\u8D25: ${message}`, true);
+      } finally {
+        setDeviceBusy(false);
       }
     });
     byId(root, "syt-run-whitelist").addEventListener("click", async () => {

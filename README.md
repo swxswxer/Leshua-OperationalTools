@@ -26,7 +26,7 @@ npm run build
 
 - `batch-reset.ts`：新批量重置接口与微信支付参数绑定。
 - `legacy-reset.ts`：填写自定义渠道后使用的旧收银通重置流程。
-- `merchant-key.ts`、`online-receipt.ts`、`code-plate-transfer.ts`、`change-whitelist.ts`：四个独立辅助工具。
+- `merchant-key.ts`、`online-receipt.ts`、`code-plate-transfer.ts`、`change-whitelist.ts`、`device-transfer.ts`：独立辅助工具。
 - `content/index.ts`：只负责悬浮窗、页面切换、表单取值与结果展示。
 - `content/contracts.ts`、`content/helpers.ts`：共享类型和通用函数。
 
