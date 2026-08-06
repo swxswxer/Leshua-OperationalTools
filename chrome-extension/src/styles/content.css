@@ -33,6 +33,7 @@
 #syt-extension-root .empty { color: #64748b; text-align: center; }
 #syt-extension-root .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
 #syt-extension-root .actions #syt-copy { grid-column: 1 / -1; }
+#syt-extension-root .actions #syt-copy.copied { color: #fff; background: #16a34a; border-color: #15803d; font-weight: 700; }
 #syt-extension-root .shared-tool-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
 #syt-extension-root .log { margin-top: 12px; }
 #syt-extension-root .log-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

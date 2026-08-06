@@ -169,6 +169,8 @@ function createPanel(api: LegacyApi): void {
       row.append(cell);
       resultBody.append(row);
       copyButton.disabled = true;
+      copyButton.classList.remove('copied');
+      copyButton.textContent = '复制结果';
       return;
     }
     results.forEach((result) => {
@@ -182,6 +184,21 @@ function createPanel(api: LegacyApi): void {
       resultBody.append(row);
     });
     copyButton.disabled = false;
+    copyButton.classList.remove('copied');
+    copyButton.textContent = '复制结果';
+  };
+  const copyCurrentResults = async (automatic = false) => {
+    if (!latestResults.length) return;
+    try {
+      await copyText(copyResultText(latestResults));
+      copyButton.classList.add('copied');
+      copyButton.textContent = '✓ 已复制';
+      log(automatic ? '已自动复制本批重置结果' : '已复制本批重置结果');
+    } catch (error) {
+      copyButton.classList.remove('copied');
+      copyButton.textContent = '复制结果';
+      log(`复制失败: ${error instanceof Error ? error.message : String(error)}`, true);
+    }
   };
   const showView = (name: string) => {
     root.querySelectorAll<HTMLElement>('.view').forEach((view) => view.classList.toggle('active', view.id === `syt-view-${name}`));
@@ -233,6 +250,10 @@ function createPanel(api: LegacyApi): void {
     }
     root.classList.remove('collapsed');
   });
+  resetInput.addEventListener('dblclick', () => {
+    resetInput.value = '';
+    resetInput.focus();
+  });
   window.addEventListener('resize', () => setFloatTop(root.getBoundingClientRect().top));
   closeButton.addEventListener('click', () => root.classList.add('collapsed'));
   backButton.addEventListener('click', () => showView('reset'));
@@ -244,12 +265,7 @@ function createPanel(api: LegacyApi): void {
   });
   logClear.addEventListener('click', () => { logFull.replaceChildren(); logPreview.textContent = '等待执行'; logPreview.className = ''; });
   copyButton.addEventListener('click', async () => {
-    try {
-      await copyText(copyResultText(latestResults));
-      log('已复制本批重置结果');
-    } catch (error) {
-      log(`复制失败: ${error instanceof Error ? error.message : String(error)}`, true);
-    }
+    await copyCurrentResults();
   });
   runReset.addEventListener('click', async () => {
     if (busy) return;
@@ -270,6 +286,7 @@ function createPanel(api: LegacyApi): void {
         ? await runLegacyReset(api, merchantIds, type, options, log, renderResults)
         : await runBatchReset(api, merchantIds, type, options, log);
       renderResults(results);
+      await copyCurrentResults(true);
       const failed = results.filter((item) => item.wechat.state === 'failure' || item.alipay.state === 'failure' || item.wechat.error || item.alipay.error).length;
       setStatus(resetStatus, failed ? `处理完成，${failed} 个商户存在失败项` : '处理完成', failed > 0);
       log(failed ? `批次完成，${failed} 个商户存在失败项` : '批次重置完成', failed > 0);

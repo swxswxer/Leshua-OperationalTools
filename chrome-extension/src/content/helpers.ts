@@ -31,8 +31,12 @@ export function skippedChannel(): ChannelResult {
 
 export async function copyText(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Some browsers reject asynchronous clipboard writes; use the legacy fallback below.
+    }
   }
   const textarea = document.createElement('textarea');
   textarea.value = text;

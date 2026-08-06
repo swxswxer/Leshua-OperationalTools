@@ -102,8 +102,11 @@
   }
   async function copyText(text) {
     if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return;
+      try {
+        await navigator.clipboard.writeText(text);
+        return;
+      } catch {
+      }
     }
     const textarea = document.createElement("textarea");
     textarea.value = text;
@@ -3630,6 +3633,8 @@
         row.append(cell);
         resultBody.append(row);
         copyButton.disabled = true;
+        copyButton.classList.remove("copied");
+        copyButton.textContent = "\u590D\u5236\u7ED3\u679C";
         return;
       }
       results.forEach((result) => {
@@ -3643,6 +3648,21 @@
         resultBody.append(row);
       });
       copyButton.disabled = false;
+      copyButton.classList.remove("copied");
+      copyButton.textContent = "\u590D\u5236\u7ED3\u679C";
+    };
+    const copyCurrentResults = async (automatic = false) => {
+      if (!latestResults.length) return;
+      try {
+        await copyText(copyResultText(latestResults));
+        copyButton.classList.add("copied");
+        copyButton.textContent = "\u2713 \u5DF2\u590D\u5236";
+        log(automatic ? "\u5DF2\u81EA\u52A8\u590D\u5236\u672C\u6279\u91CD\u7F6E\u7ED3\u679C" : "\u5DF2\u590D\u5236\u672C\u6279\u91CD\u7F6E\u7ED3\u679C");
+      } catch (error) {
+        copyButton.classList.remove("copied");
+        copyButton.textContent = "\u590D\u5236\u7ED3\u679C";
+        log(`\u590D\u5236\u5931\u8D25: ${error instanceof Error ? error.message : String(error)}`, true);
+      }
     };
     const showView = (name) => {
       root.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === `syt-view-${name}`));
@@ -3697,6 +3717,10 @@
       }
       root.classList.remove("collapsed");
     });
+    resetInput.addEventListener("dblclick", () => {
+      resetInput.value = "";
+      resetInput.focus();
+    });
     window.addEventListener("resize", () => setFloatTop(root.getBoundingClientRect().top));
     closeButton.addEventListener("click", () => root.classList.add("collapsed"));
     backButton.addEventListener("click", () => showView("reset"));
@@ -3712,12 +3736,7 @@
       logPreview.className = "";
     });
     copyButton.addEventListener("click", async () => {
-      try {
-        await copyText(copyResultText(latestResults));
-        log("\u5DF2\u590D\u5236\u672C\u6279\u91CD\u7F6E\u7ED3\u679C");
-      } catch (error) {
-        log(`\u590D\u5236\u5931\u8D25: ${error instanceof Error ? error.message : String(error)}`, true);
-      }
+      await copyCurrentResults();
     });
     runReset.addEventListener("click", async () => {
       if (busy) return;
@@ -3736,6 +3755,7 @@
         log(`\u5F00\u59CB${useLegacy ? "\u81EA\u5B9A\u4E49\u6E20\u9053" : "\u6279\u91CF"}\u91CD\u7F6E: ${merchantIds.join("\uFF1B")}`);
         const results = useLegacy ? await runLegacyReset(api, merchantIds, type, options, log, renderResults) : await runBatchReset(api, merchantIds, type, options, log);
         renderResults(results);
+        await copyCurrentResults(true);
         const failed = results.filter((item) => item.wechat.state === "failure" || item.alipay.state === "failure" || item.wechat.error || item.alipay.error).length;
         setStatus(resetStatus, failed ? `\u5904\u7406\u5B8C\u6210\uFF0C${failed} \u4E2A\u5546\u6237\u5B58\u5728\u5931\u8D25\u9879` : "\u5904\u7406\u5B8C\u6210", failed > 0);
         log(failed ? `\u6279\u6B21\u5B8C\u6210\uFF0C${failed} \u4E2A\u5546\u6237\u5B58\u5728\u5931\u8D25\u9879` : "\u6279\u6B21\u91CD\u7F6E\u5B8C\u6210", failed > 0);
