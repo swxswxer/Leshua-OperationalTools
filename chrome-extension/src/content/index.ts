@@ -13,14 +13,14 @@ import { enableOnlineReceipt } from '../tools/online-receipt';
 import { transferCodePlates } from '../tools/code-plate-transfer';
 import { addChangeWhitelist } from '../tools/change-whitelist';
 import { queryNewDeviceAgent, queryOldDeviceAgent, submitDeviceTransfer, type DeviceTransferValues } from '../tools/device-transfer';
+import type { DesktopOperation, NativeExecuteMessage, NativeResultMessage } from '../shared/desktop-bridge';
 
-// The existing userscript is bundled locally so its verified auxiliary-tool APIs
-// can be reused during the first extension release. It runs only in this
-// extension's isolated content-script world, not in the page console.
-// @ts-ignore JavaScript userscript is intentionally bundled as a compatibility module.
-import '../../../syt-submch-reset.user.js';
-// @ts-ignore JavaScript userscript is intentionally bundled as a compatibility module.
-import '../../../lhsd-submch-reset.user.js';
+// These compatibility modules are part of the extension source bundle. They preserve
+// the established legacy flows without requiring the separately distributed userscripts.
+// @ts-ignore JavaScript compatibility module is intentionally bundled.
+import '../legacy/syt-submch-reset.js';
+// @ts-ignore JavaScript compatibility module is intentionally bundled.
+import '../legacy/lhsd-submch-reset.js';
 
 const VERSION = '1.0.2';
 const FLOAT_TOP_STORAGE_KEY = 'syt-extension-float-top';
@@ -65,7 +65,11 @@ function businessLineName(businessLine: 'syt' | 'lhsd'): string {
   return businessLine === 'lhsd' ? '联合收单' : '收银通';
 }
 
-function createPanel(api: LegacyApi): void {
+interface PanelController {
+  executeDesktopOperation(operation: DesktopOperation): Promise<{ message: string; copied?: boolean }>;
+}
+
+function createPanel(api: LegacyApi): PanelController {
   document.getElementById('syt-auto-report-panel')?.remove();
   document.getElementById('lhsd-auto-report-panel')?.remove();
   document.getElementById('syt-extension-root')?.remove();
@@ -126,6 +130,7 @@ function createPanel(api: LegacyApi): void {
   const logClear = byId<HTMLButtonElement>(root, 'syt-log-clear');
   let latestResults: MerchantReportResult[] = [];
   let busy = false;
+  let lastAutomaticCopySucceeded = false;
 
   const clampFloatTop = (top: number): number => Math.min(
     Math.max(FLOAT_VIEWPORT_GAP, top),
@@ -202,17 +207,19 @@ function createPanel(api: LegacyApi): void {
     copyButton.classList.remove('copied');
     copyButton.textContent = '复制结果';
   };
-  const copyCurrentResults = async (automatic = false) => {
-    if (!latestResults.length) return;
+  const copyCurrentResults = async (automatic = false): Promise<boolean> => {
+    if (!latestResults.length) return false;
     try {
       await copyText(copyResultText(latestResults));
       copyButton.classList.add('copied');
       copyButton.textContent = '✓ 已复制';
       log(automatic ? '已自动复制本批重置结果' : '已复制本批重置结果');
+      return true;
     } catch (error) {
       copyButton.classList.remove('copied');
       copyButton.textContent = '复制结果';
       log(`复制失败: ${error instanceof Error ? error.message : String(error)}`, true);
+      return false;
     }
   };
   const showView = (name: string) => {
@@ -282,12 +289,16 @@ function createPanel(api: LegacyApi): void {
   copyButton.addEventListener('click', async () => {
     await copyCurrentResults();
   });
-  runReset.addEventListener('click', async () => {
-    if (busy) return;
+  const executeReset = async (
+    requestedMerchantIds?: string[],
+    requestedType?: ReportType,
+    requestedBusinessLine?: 'syt' | 'lhsd',
+  ): Promise<MerchantReportResult[]> => {
+    if (busy) throw new Error('当前有任务正在执行，请稍后重试');
     try {
-      const merchantIds = parseMerchantIds(resetInput.value);
-      const type = reportType.value as ReportType;
-      const businessLine = selectedBusinessLine();
+      const merchantIds = requestedMerchantIds || parseMerchantIds(resetInput.value);
+      const type = requestedType || reportType.value as ReportType;
+      const businessLine = requestedBusinessLine || selectedBusinessLine();
       const reportMode: ReportMode = businessLine === 'lhsd' ? 'COMMON' : 'SYT';
       const options = reportOptions();
       validateChannels(options);
@@ -295,6 +306,7 @@ function createPanel(api: LegacyApi): void {
         throw new Error('支付宝单独重置不能绑定微信支付参数，请选择微信或全部重置');
       }
       setBusy(true);
+      lastAutomaticCopySucceeded = false;
       renderResults([]);
       const useLegacy = hasCustomChannel(options);
       setStatus(resetStatus, useLegacy ? `使用${businessLineName(businessLine)}自定义渠道旧流程处理中` : `正在调用${businessLineName(businessLine)}批量重置接口`);
@@ -304,18 +316,43 @@ function createPanel(api: LegacyApi): void {
         ? await runLegacyReset(resetApi, merchantIds, type, options, log, renderResults, businessLine)
         : await runBatchReset(resetApi, merchantIds, type, options, log, reportMode);
       renderResults(results);
-      await copyCurrentResults(true);
+      lastAutomaticCopySucceeded = await copyCurrentResults(true);
       const failed = results.filter((item) => item.wechat.state === 'failure' || item.alipay.state === 'failure' || item.wechat.error || item.alipay.error).length;
       setStatus(resetStatus, failed ? `处理完成，${failed} 个商户存在失败项` : '处理完成', failed > 0);
       log(failed ? `批次完成，${failed} 个商户存在失败项` : '批次重置完成', failed > 0);
+      return results;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatus(resetStatus, message, true);
       log(`重置失败: ${message}`, true);
+      throw error;
     } finally {
       setBusy(false);
     }
+  };
+
+  runReset.addEventListener('click', () => {
+    void executeReset().catch(() => undefined);
   });
+
+  const executeMerchantKey = async (merchantId: string): Promise<void> => {
+    if (busy) throw new Error('当前有任务正在执行，请稍后重试');
+    try {
+      setBusy(true);
+      setStatus(resetStatus, '配置商户 key 处理中...');
+      log(`开始配置商户 ${merchantId} 的 key`);
+      await configureMerchantKey(api, merchantId, log);
+      setStatus(resetStatus, '配置商户 key 处理完成');
+      log(`商户 ${merchantId} 的 key 配置完成`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(resetStatus, message, true);
+      log(`配置商户 key 失败: ${message}`, true);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  };
 
   runPaymentConfig.addEventListener('click', async () => {
     if (busy) return;
@@ -367,7 +404,17 @@ function createPanel(api: LegacyApi): void {
       }
     });
   };
-  runSharedMerchantTool(runKey, '配置商户 key', async (merchantId) => configureMerchantKey(api, merchantId, log));
+  runKey.addEventListener('click', () => {
+    try {
+      const merchantIds = parseMerchantIds(resetInput.value);
+      if (merchantIds.length !== 1) throw new Error('配置商户 key 一次只能处理一个乐刷商户号');
+      void executeMerchantKey(merchantIds[0]).catch(() => undefined);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(resetStatus, message, true);
+      log(`配置商户 key 失败: ${message}`, true);
+    }
+  });
   runSharedMerchantTool(runReceipt, '开通在线收款单', async (merchantId) => enableOnlineReceipt(api, merchantId, log));
   byId<HTMLButtonElement>(root, 'syt-run-code').addEventListener('click', async () => {
     const status = byId<HTMLElement>(root, 'syt-code-status');
@@ -487,6 +534,34 @@ function createPanel(api: LegacyApi): void {
     if (!root.classList.contains('collapsed') && !root.contains(event.target as Node)) root.classList.add('collapsed');
   });
   applyPreset();
+
+  return {
+    async executeDesktopOperation(operation: DesktopOperation): Promise<{ message: string; copied?: boolean }> {
+      if (!/^\d{10}$/.test(operation.merchantId)) throw new Error('乐刷商户号必须是 10 位数字');
+      root.classList.remove('collapsed');
+      showView('reset');
+      resetInput.value = operation.merchantId;
+      resetInput.focus();
+
+      if (operation.action === 'merchant-key') {
+        await executeMerchantKey(operation.merchantId);
+        return { message: `商户 ${operation.merchantId} 的 key 已配置` };
+      }
+
+      const businessLine = operation.businessLine || 'syt';
+      const type = operation.reportType || 'ALL';
+      businessLineInputs.forEach((input) => { input.checked = input.value === businessLine; });
+      reportType.value = type;
+      preset.value = '0';
+      applyPreset();
+      const results = await executeReset([operation.merchantId], type, businessLine);
+      const failed = results.some((result) => result.wechat.state === 'failure' || result.alipay.state === 'failure');
+      return {
+        message: failed ? `商户 ${operation.merchantId} 处理完成，但存在失败项` : `商户 ${operation.merchantId} 重置完成`,
+        copied: lastAutomaticCopySucceeded,
+      };
+    },
+  };
 }
 
 function getLegacyApi(businessLine: 'syt' | 'lhsd'): LegacyApi {
@@ -496,10 +571,39 @@ function getLegacyApi(businessLine: 'syt' | 'lhsd'): LegacyApi {
   return api;
 }
 
+let panelController: PanelController | undefined;
+
 function bootstrap(): void {
   if (window.top !== window.self) return;
   const api = getLegacyApi('syt');
-  createPanel(api);
+  panelController = createPanel(api);
 }
 
 bootstrap();
+
+chrome.runtime.onMessage.addListener((message: NativeExecuteMessage, _sender, sendResponse) => {
+  if (message?.type !== 'operations-companion.execute') return;
+  if (!panelController) {
+    sendResponse({
+      type: 'operations-companion.result',
+      requestId: message.requestId,
+      ok: false,
+      message: '运营工具尚未加载完成，请刷新当前页面后重试。',
+    } satisfies NativeResultMessage);
+    return;
+  }
+  void panelController.executeDesktopOperation(message)
+    .then((result) => sendResponse({
+      type: 'operations-companion.result',
+      requestId: message.requestId,
+      ok: true,
+      ...result,
+    } satisfies NativeResultMessage))
+    .catch((error) => sendResponse({
+      type: 'operations-companion.result',
+      requestId: message.requestId,
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    } satisfies NativeResultMessage));
+  return true;
+});

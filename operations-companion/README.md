@@ -18,9 +18,17 @@ npm install
 npm run tauri dev
 ```
 
-## 第一期开关说明
+## Chrome 插件联动
 
-本期已完成跨应用快捷键、剪贴板读取及操作选择界面。菜单操作会生成结构化指令；下一期接入 Chrome Native Messaging 后，将由已登录运营后台的 Chrome 插件实际执行操作并把结果回传。
+桌面工具首次启动时会自动注册 Chrome Native Messaging Host。之后操作流程如下：
+
+1. 在 Chrome 中启用本仓库 `chrome-extension/dist` 目录中的“运营工具”扩展。
+2. 登录并保持至少一个 `https://om.leshuazf.com/` 运营后台页面打开。
+3. 在任意应用中复制 10 位乐刷商户号，按 Windows `Ctrl + R` 或 macOS `Command + R`。
+4. 选择收银通/联合收单及重置通道，桌面工具会把指令发送给 Chrome 插件。
+5. Chrome 插件会展开自己的面板、同步显示执行结果，并在重置结束后自动复制结果。
+
+桥接只监听本机回环地址，且桌面工具和 Native Host 使用本机随机令牌校验。未启动 Chrome 或未启用扩展时，桌面工具会提示连接失败。
 
 ## Chrome 插件固定 ID
 

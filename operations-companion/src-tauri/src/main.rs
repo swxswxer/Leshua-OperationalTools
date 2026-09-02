@@ -1,5 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod native_host;
+
+use native_host::{execute_operation, register_native_host, DesktopOperation};
+use std::env;
 use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position, Size, WebviewWindow,
     WindowEvent,
@@ -34,7 +38,18 @@ fn hide_menu(window: WebviewWindow) -> Result<(), String> {
     window.hide().map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn execute_desktop_operation(
+    operation: DesktopOperation,
+) -> Result<native_host::BridgeResponse, String> {
+    execute_operation(operation)
+}
+
 fn main() {
+    if env::args().any(|argument| argument == "--native-host") {
+        native_host::run();
+        return;
+    }
     let modifier = if cfg!(target_os = "macos") {
         Modifiers::SUPER
     } else {
@@ -54,6 +69,7 @@ fn main() {
                 .build(),
         )
         .setup(move |app| {
+            register_native_host()?;
             app.global_shortcut().register(shortcut)?;
             if let Some(window) = app.get_webview_window("main") {
                 let window_to_hide = window.clone();
@@ -65,7 +81,11 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![hide_menu, resize_menu])
+        .invoke_handler(tauri::generate_handler![
+            hide_menu,
+            resize_menu,
+            execute_desktop_operation
+        ])
         .run(tauri::generate_context!())
         .expect("启动运营工具快捷菜单失败");
 }

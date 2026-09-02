@@ -15,6 +15,15 @@ await build({
   sourcemap: false,
   legalComments: 'none',
 });
+await build({
+  entryPoints: [new URL('./src/background.ts', root).pathname],
+  bundle: true,
+  outfile: new URL('./background.js', dist).pathname,
+  target: ['chrome120'],
+  format: 'iife',
+  sourcemap: false,
+  legalComments: 'none',
+});
 await cp(new URL('./src/styles/content.css', root), new URL('./content.css', dist));
 await cp(new URL('./manifest.json', root), new URL('./manifest.json', dist));
 

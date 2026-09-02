@@ -10,6 +10,12 @@ type Operation = {
   reportType?: '微信' | '支付宝' | '全部';
 };
 
+type BridgeResponse = {
+  ok: boolean;
+  message: string;
+  copied?: boolean;
+};
+
 type OperationGroup = {
   label: '收银通' | '联合收单';
   operations: Operation[];
@@ -72,8 +78,19 @@ async function chooseOperation(operation: Operation): Promise<void> {
     window.alert('未识别到 10 位乐刷商户号，请先选中并复制商户号。');
     return;
   }
-  // Native Messaging bridge will send this structured instruction to Chrome in phase two.
-  console.info('operations-companion command', { merchantId, operation });
+  const request = operation.id === 'merchant-key'
+    ? { action: 'merchant-key', merchantId }
+    : {
+      action: 'reset',
+      merchantId,
+      businessLine: operation.businessLine === '联合收单' ? 'lhsd' : 'syt',
+      reportType: operation.reportType === '微信' ? 'WECHAT' : operation.reportType === '支付宝' ? 'ALIPAY' : 'ALL',
+    };
+  void invoke<BridgeResponse>('execute_desktop_operation', { operation: request })
+    .then((result) => {
+      if (!result.ok) window.alert(result.message);
+    })
+    .catch((error) => window.alert(error instanceof Error ? error.message : String(error)));
   await invoke('hide_menu');
 }
 

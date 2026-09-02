@@ -6,8 +6,13 @@
   "description": "运营后台联合收单、收银通子商户号重置及辅助工具。",
   "permissions": [
     "storage",
-    "clipboardWrite"
+    "clipboardWrite",
+    "nativeMessaging",
+    "tabs"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": ["https://om.leshuazf.com/*"],
