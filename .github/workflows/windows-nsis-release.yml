@@ -17,6 +17,17 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: operations-companion/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: operations-companion
+        run: npm ci
+
       - name: Build and publish Windows installer
         uses: tauri-apps/tauri-action@v0
         env:
