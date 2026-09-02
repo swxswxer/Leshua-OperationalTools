@@ -1,0 +1,16 @@
+:root { font-family: "Microsoft YaHei", "Segoe UI", sans-serif; color: #1f2937; background: transparent; font-size: 13px; }
+* { box-sizing: border-box; }
+body { margin: 0; background: transparent; }
+button { font: inherit; cursor: pointer; }
+.menu { overflow: hidden; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; box-shadow: 0 8px 20px rgba(15, 23, 42, .2); }
+.operation-list { padding: 3px 0; }
+.operation-group { border-bottom: 1px solid #e2e8f0; }
+.operation-list button { width: 100%; min-height: 34px; padding: 6px 10px; color: #1f2937; background: #fff; border: 0; font-size: 13px; text-align: left; }
+.operation-list button:hover { color: #fff; background: #2563eb; }
+.group-trigger { display: flex; align-items: center; justify-content: space-between; font-weight: 700; }
+.arrow { color: #64748b; font-size: 18px; line-height: 16px; transition: transform .15s ease; }
+.operation-group.expanded .arrow { transform: rotate(90deg); color: inherit; }
+.submenu { display: none; padding: 2px 0 4px; background: #f8fafc; }
+.operation-group.expanded .submenu { display: block; }
+.submenu button { min-height: 28px; padding: 5px 10px 5px 27px; color: #334155; background: #f8fafc; font-size: 12px; }
+.direct-operation { font-weight: 700; }
