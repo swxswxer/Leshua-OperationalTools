@@ -5414,7 +5414,6 @@
     const logClear = byId(root, "syt-log-clear");
     let latestResults = [];
     let busy = false;
-    let lastAutomaticCopySucceeded = false;
     const clampFloatTop = (top) => Math.min(
       Math.max(FLOAT_VIEWPORT_GAP, top),
       Math.max(FLOAT_VIEWPORT_GAP, window.innerHeight - FLOAT_SIZE - FLOAT_VIEWPORT_GAP)
@@ -5493,18 +5492,16 @@
       copyButton.textContent = "\u590D\u5236\u7ED3\u679C";
     };
     const copyCurrentResults = async (automatic = false) => {
-      if (!latestResults.length) return false;
+      if (!latestResults.length) return;
       try {
         await copyText(copyResultText(latestResults));
         copyButton.classList.add("copied");
         copyButton.textContent = "\u2713 \u5DF2\u590D\u5236";
         log(automatic ? "\u5DF2\u81EA\u52A8\u590D\u5236\u672C\u6279\u91CD\u7F6E\u7ED3\u679C" : "\u5DF2\u590D\u5236\u672C\u6279\u91CD\u7F6E\u7ED3\u679C");
-        return true;
       } catch (error) {
         copyButton.classList.remove("copied");
         copyButton.textContent = "\u590D\u5236\u7ED3\u679C";
         log(`\u590D\u5236\u5931\u8D25: ${error instanceof Error ? error.message : String(error)}`, true);
-        return false;
       }
     };
     const showView = (name) => {
@@ -5581,12 +5578,12 @@
     copyButton.addEventListener("click", async () => {
       await copyCurrentResults();
     });
-    const executeReset = async (requestedMerchantIds, requestedType, requestedBusinessLine) => {
-      if (busy) throw new Error("\u5F53\u524D\u6709\u4EFB\u52A1\u6B63\u5728\u6267\u884C\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5");
+    runReset.addEventListener("click", async () => {
+      if (busy) return;
       try {
-        const merchantIds = requestedMerchantIds || parseMerchantIds(resetInput.value);
-        const type = requestedType || reportType.value;
-        const businessLine = requestedBusinessLine || selectedBusinessLine();
+        const merchantIds = parseMerchantIds(resetInput.value);
+        const type = reportType.value;
+        const businessLine = selectedBusinessLine();
         const reportMode = businessLine === "lhsd" ? "COMMON" : "SYT";
         const options = reportOptions();
         validateChannels(options);
@@ -5594,7 +5591,6 @@
           throw new Error("\u652F\u4ED8\u5B9D\u5355\u72EC\u91CD\u7F6E\u4E0D\u80FD\u7ED1\u5B9A\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\uFF0C\u8BF7\u9009\u62E9\u5FAE\u4FE1\u6216\u5168\u90E8\u91CD\u7F6E");
         }
         setBusy(true);
-        lastAutomaticCopySucceeded = false;
         renderResults([]);
         const useLegacy = hasCustomChannel(options);
         setStatus(resetStatus, useLegacy ? `\u4F7F\u7528${businessLineName(businessLine)}\u81EA\u5B9A\u4E49\u6E20\u9053\u65E7\u6D41\u7A0B\u5904\u7406\u4E2D` : `\u6B63\u5728\u8C03\u7528${businessLineName(businessLine)}\u6279\u91CF\u91CD\u7F6E\u63A5\u53E3`);
@@ -5602,41 +5598,18 @@
         const resetApi = businessLine === "lhsd" ? getLegacyApi("lhsd") : api;
         const results = useLegacy ? await runLegacyReset(resetApi, merchantIds, type, options, log, renderResults, businessLine) : await runBatchReset(resetApi, merchantIds, type, options, log, reportMode);
         renderResults(results);
-        lastAutomaticCopySucceeded = await copyCurrentResults(true);
+        await copyCurrentResults(true);
         const failed = results.filter((item) => item.wechat.state === "failure" || item.alipay.state === "failure" || item.wechat.error || item.alipay.error).length;
         setStatus(resetStatus, failed ? `\u5904\u7406\u5B8C\u6210\uFF0C${failed} \u4E2A\u5546\u6237\u5B58\u5728\u5931\u8D25\u9879` : "\u5904\u7406\u5B8C\u6210", failed > 0);
         log(failed ? `\u6279\u6B21\u5B8C\u6210\uFF0C${failed} \u4E2A\u5546\u6237\u5B58\u5728\u5931\u8D25\u9879` : "\u6279\u6B21\u91CD\u7F6E\u5B8C\u6210", failed > 0);
-        return results;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         setStatus(resetStatus, message, true);
         log(`\u91CD\u7F6E\u5931\u8D25: ${message}`, true);
-        throw error;
       } finally {
         setBusy(false);
       }
-    };
-    runReset.addEventListener("click", () => {
-      void executeReset().catch(() => void 0);
     });
-    const executeMerchantKey = async (merchantId) => {
-      if (busy) throw new Error("\u5F53\u524D\u6709\u4EFB\u52A1\u6B63\u5728\u6267\u884C\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5");
-      try {
-        setBusy(true);
-        setStatus(resetStatus, "\u914D\u7F6E\u5546\u6237 key \u5904\u7406\u4E2D...");
-        log(`\u5F00\u59CB\u914D\u7F6E\u5546\u6237 ${merchantId} \u7684 key`);
-        await configureMerchantKey(api, merchantId, log);
-        setStatus(resetStatus, "\u914D\u7F6E\u5546\u6237 key \u5904\u7406\u5B8C\u6210");
-        log(`\u5546\u6237 ${merchantId} \u7684 key \u914D\u7F6E\u5B8C\u6210`);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        setStatus(resetStatus, message, true);
-        log(`\u914D\u7F6E\u5546\u6237 key \u5931\u8D25: ${message}`, true);
-        throw error;
-      } finally {
-        setBusy(false);
-      }
-    };
     runPaymentConfig.addEventListener("click", async () => {
       if (busy) return;
       try {
@@ -5686,17 +5659,7 @@
         }
       });
     };
-    runKey.addEventListener("click", () => {
-      try {
-        const merchantIds = parseMerchantIds(resetInput.value);
-        if (merchantIds.length !== 1) throw new Error("\u914D\u7F6E\u5546\u6237 key \u4E00\u6B21\u53EA\u80FD\u5904\u7406\u4E00\u4E2A\u4E50\u5237\u5546\u6237\u53F7");
-        void executeMerchantKey(merchantIds[0]).catch(() => void 0);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        setStatus(resetStatus, message, true);
-        log(`\u914D\u7F6E\u5546\u6237 key \u5931\u8D25: ${message}`, true);
-      }
-    });
+    runSharedMerchantTool(runKey, "\u914D\u7F6E\u5546\u6237 key", async (merchantId) => configureMerchantKey(api, merchantId, log));
     runSharedMerchantTool(runReceipt, "\u5F00\u901A\u5728\u7EBF\u6536\u6B3E\u5355", async (merchantId) => enableOnlineReceipt(api, merchantId, log));
     byId(root, "syt-run-code").addEventListener("click", async () => {
       const status = byId(root, "syt-code-status");
@@ -5828,33 +5791,6 @@
       if (!root.classList.contains("collapsed") && !root.contains(event.target)) root.classList.add("collapsed");
     });
     applyPreset();
-    return {
-      async executeDesktopOperation(operation) {
-        if (!/^\d{10}$/.test(operation.merchantId)) throw new Error("\u4E50\u5237\u5546\u6237\u53F7\u5FC5\u987B\u662F 10 \u4F4D\u6570\u5B57");
-        root.classList.remove("collapsed");
-        showView("reset");
-        resetInput.value = operation.merchantId;
-        resetInput.focus();
-        if (operation.action === "merchant-key") {
-          await executeMerchantKey(operation.merchantId);
-          return { message: `\u5546\u6237 ${operation.merchantId} \u7684 key \u5DF2\u914D\u7F6E` };
-        }
-        const businessLine = operation.businessLine || "syt";
-        const type = operation.reportType || "ALL";
-        businessLineInputs.forEach((input) => {
-          input.checked = input.value === businessLine;
-        });
-        reportType.value = type;
-        preset.value = "0";
-        applyPreset();
-        const results = await executeReset([operation.merchantId], type, businessLine);
-        const failed = results.some((result) => result.wechat.state === "failure" || result.alipay.state === "failure");
-        return {
-          message: failed ? `\u5546\u6237 ${operation.merchantId} \u5904\u7406\u5B8C\u6210\uFF0C\u4F46\u5B58\u5728\u5931\u8D25\u9879` : `\u5546\u6237 ${operation.merchantId} \u91CD\u7F6E\u5B8C\u6210`,
-          copied: lastAutomaticCopySucceeded
-        };
-      }
-    };
   }
   function getLegacyApi(businessLine) {
     const apiName = businessLine === "lhsd" ? "lhsdAutoReport" : "sytAutoReport";
@@ -5862,35 +5798,10 @@
     if (!api) throw new Error(`\u672A\u52A0\u8F7D${businessLineName(businessLine)}\u91CD\u7F6E\u529F\u80FD`);
     return api;
   }
-  var panelController;
   function bootstrap() {
     if (window.top !== window.self) return;
     const api = getLegacyApi("syt");
-    panelController = createPanel(api);
+    createPanel(api);
   }
   bootstrap();
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type !== "operations-companion.execute") return;
-    if (!panelController) {
-      sendResponse({
-        type: "operations-companion.result",
-        requestId: message.requestId,
-        ok: false,
-        message: "\u8FD0\u8425\u5DE5\u5177\u5C1A\u672A\u52A0\u8F7D\u5B8C\u6210\uFF0C\u8BF7\u5237\u65B0\u5F53\u524D\u9875\u9762\u540E\u91CD\u8BD5\u3002"
-      });
-      return;
-    }
-    void panelController.executeDesktopOperation(message).then((result) => sendResponse({
-      type: "operations-companion.result",
-      requestId: message.requestId,
-      ok: true,
-      ...result
-    })).catch((error) => sendResponse({
-      type: "operations-companion.result",
-      requestId: message.requestId,
-      ok: false,
-      message: error instanceof Error ? error.message : String(error)
-    }));
-    return true;
-  });
 })();

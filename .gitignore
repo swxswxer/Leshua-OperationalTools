@@ -3,5 +3,3 @@
 node_modules
 outputs/
 scripts/build_order_excel.mjs
-operations-companion/dist/
-operations-companion/src-tauri/target/
