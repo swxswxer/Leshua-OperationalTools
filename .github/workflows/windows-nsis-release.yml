@@ -1,0 +1,31 @@
+name: Build Windows Installer
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build NSIS installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build and publish Windows installer
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: operations-companion
+          tagName: ${{ github.ref_name }}
+          releaseName: "运营工具 ${{ github.ref_name }}"
+          releaseBody: "Windows NSIS 安装包。"
+          releaseDraft: false
+          prerelease: false
+          args: --bundles nsis
