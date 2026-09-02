@@ -13,6 +13,7 @@ export interface ReportOptions {
   disableOldSubMch: boolean;
   onLog?: (message: string, context?: unknown) => void;
   onReportedSubMchId?: (type: 'wechat' | 'alipay', subMchId: string) => void;
+  onConfigRow?: (row: { fId?: string | number; fWxSubMchId?: string }) => void;
 }
 
 export interface CodePlateValues {
@@ -37,6 +38,7 @@ export interface LegacyApi {
   wechatAutoReport(merchantId: string, options: ReportOptions): Promise<{ newWxSubMchId: string }>;
   alipayAutoReport(merchantId: string, options: ReportOptions): Promise<{ newZfbSubMchId: string }>;
   bindWechatPaymentConfig(merchantId: string, wxSubMchId: string, options: ReportOptions): Promise<unknown>;
+  bindLatestWechatPaymentConfig(merchantId: string, options: ReportOptions): Promise<unknown>;
 }
 
 export interface ResetExecution {

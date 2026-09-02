@@ -1,5 +1,6 @@
 import {
   type MerchantReportResult,
+  type ReportMode,
   type ReportType,
   parseMerchantIds,
 } from './quick-report';
@@ -18,8 +19,10 @@ import { queryNewDeviceAgent, queryOldDeviceAgent, submitDeviceTransfer, type De
 // extension's isolated content-script world, not in the page console.
 // @ts-ignore JavaScript userscript is intentionally bundled as a compatibility module.
 import '../../../syt-submch-reset.user.js';
+// @ts-ignore JavaScript userscript is intentionally bundled as a compatibility module.
+import '../../../lhsd-submch-reset.user.js';
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.2';
 const FLOAT_TOP_STORAGE_KEY = 'syt-extension-float-top';
 const FLOAT_SIZE = 54;
 const FLOAT_VIEWPORT_GAP = 8;
@@ -58,24 +61,30 @@ function copyResultText(results: MerchantReportResult[]): string {
   }).join('\n');
 }
 
+function businessLineName(businessLine: 'syt' | 'lhsd'): string {
+  return businessLine === 'lhsd' ? '联合收单' : '收银通';
+}
+
 function createPanel(api: LegacyApi): void {
   document.getElementById('syt-auto-report-panel')?.remove();
+  document.getElementById('lhsd-auto-report-panel')?.remove();
   document.getElementById('syt-extension-root')?.remove();
 
   const root = document.createElement('div');
   root.id = 'syt-extension-root';
   root.className = 'collapsed';
   root.innerHTML = `
-    <button id="syt-extension-float" class="float-ball" type="button" title="打开收银通运营工具">收银通</button>
-    <section class="panel" aria-label="收银通运营工具">
-      <header><div><button id="syt-back" class="icon-button" type="button" title="返回">←</button><span id="syt-title">收银通运营工具 v${VERSION}</span></div><button id="syt-close" class="icon-button" type="button" title="收起">×</button></header>
+    <button id="syt-extension-float" class="float-ball" type="button" title="打开运营工具">运营工具</button>
+    <section class="panel" aria-label="运营工具">
+      <header><div><button id="syt-back" class="icon-button" type="button" title="返回">←</button><span id="syt-title">运营工具 v${VERSION}</span></div><button id="syt-close" class="icon-button" type="button" title="收起">×</button></header>
       <main>
         <section id="syt-view-reset" class="view active">
           <label>乐刷商户号<input id="syt-merchant-ids" placeholder="最多 5 个，以 ; 分隔" autocomplete="off"></label>
+          <fieldset class="business-line"><legend>重置业务线</legend><label><input type="radio" name="syt-business-line" value="syt" checked>收银通</label><label><input type="radio" name="syt-business-line" value="lhsd">联合收单</label></fieldset>
           <div class="form-row"><label>重置通道<select id="syt-report-type"><option value="ALL">全部重置</option><option value="WECHAT">微信重置</option><option value="ALIPAY">支付宝重置</option></select></label><label>上报预设<select id="syt-preset">${PRESETS.map((preset, index) => `<option value="${index}">${preset.name}</option>`).join('')}</select></label></div>
           <div id="syt-channel-options" class="optional-options"><div class="section-title">可选上报渠道</div><div class="form-row"><label>微信渠道号<input id="syt-wx-channel-id" autocomplete="off"></label><label>微信渠道主体<input id="syt-wx-channel-name" autocomplete="off"></label></div><div class="form-row"><label>支付宝渠道号<input id="syt-alipay-channel-id" autocomplete="off"></label><label>支付宝渠道主体<input id="syt-alipay-channel-name" autocomplete="off"></label></div></div>
           <div class="section-title">微信支付参数（可选）</div><label>appid<input id="syt-appid" autocomplete="off"></label><label>支付授权目录<input id="syt-jsapi-paths" autocomplete="off"></label>
-          <button id="syt-run-reset" class="primary" type="button">执行重置</button>
+          <div class="reset-actions"><button id="syt-run-reset" class="primary" type="button">执行重置</button><button id="syt-run-payment-config" type="button">配置绑定</button></div>
           <div class="shared-tool-actions"><button id="syt-run-key" type="button">配置商户 key</button><button id="syt-run-receipt" type="button">开通在线收款单</button></div>
           <div id="syt-reset-status" class="status"></div>
           <div class="section-title">本次重置结果</div><div class="result-table-wrap"><table><thead><tr><th>乐刷商户号</th><th>微信子商户号</th><th>支付宝子商户号</th><th>方式</th></tr></thead><tbody id="syt-results"><tr><td colspan="4" class="empty">执行后显示结果</td></tr></tbody></table></div>
@@ -94,6 +103,7 @@ function createPanel(api: LegacyApi): void {
   const backButton = byId<HTMLButtonElement>(root, 'syt-back');
   const title = byId<HTMLElement>(root, 'syt-title');
   const resetInput = byId<HTMLInputElement>(root, 'syt-merchant-ids');
+  const businessLineInputs = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="syt-business-line"]'));
   const reportType = byId<HTMLSelectElement>(root, 'syt-report-type');
   const preset = byId<HTMLSelectElement>(root, 'syt-preset');
   const channelOptions = byId<HTMLElement>(root, 'syt-channel-options');
@@ -104,6 +114,7 @@ function createPanel(api: LegacyApi): void {
   const appids = byId<HTMLInputElement>(root, 'syt-appid');
   const jsapiPaths = byId<HTMLInputElement>(root, 'syt-jsapi-paths');
   const runReset = byId<HTMLButtonElement>(root, 'syt-run-reset');
+  const runPaymentConfig = byId<HTMLButtonElement>(root, 'syt-run-payment-config');
   const runKey = byId<HTMLButtonElement>(root, 'syt-run-key');
   const runReceipt = byId<HTMLButtonElement>(root, 'syt-run-receipt');
   const resetStatus = byId<HTMLElement>(root, 'syt-reset-status');
@@ -146,6 +157,7 @@ function createPanel(api: LegacyApi): void {
   const setBusy = (next: boolean) => {
     busy = next;
     runReset.disabled = next;
+    runPaymentConfig.disabled = next;
     runKey.disabled = next;
     runReceipt.disabled = next;
     runReset.textContent = next ? '处理中...' : '执行重置';
@@ -157,6 +169,7 @@ function createPanel(api: LegacyApi): void {
     disableOldSubMch: true,
     onLog: (message, context) => log(message, context === true),
   });
+  const selectedBusinessLine = (): 'syt' | 'lhsd' => businessLineInputs.find((input) => input.checked)?.value === 'lhsd' ? 'lhsd' : 'syt';
   const renderResults = (results: MerchantReportResult[]) => {
     latestResults = results;
     resultBody.replaceChildren();
@@ -175,7 +188,9 @@ function createPanel(api: LegacyApi): void {
     }
     results.forEach((result) => {
       const row = document.createElement('tr');
-      [result.merchantId, channelText(result.wechat), channelText(result.alipay), result.route === 'batch' ? '批量接口' : '自定义渠道'].forEach((value) => {
+      const lineName = businessLineName(result.businessLine || 'syt');
+      const routeText = result.route === 'batch' ? `${lineName}批量` : `${lineName}自定义渠道`;
+      [result.merchantId, channelText(result.wechat), channelText(result.alipay), routeText].forEach((value) => {
         const cell = document.createElement('td');
         cell.textContent = value;
         if (value.startsWith('失败')) cell.className = 'error';
@@ -203,7 +218,7 @@ function createPanel(api: LegacyApi): void {
   const showView = (name: string) => {
     root.querySelectorAll<HTMLElement>('.view').forEach((view) => view.classList.toggle('active', view.id === `syt-view-${name}`));
     backButton.classList.toggle('visible', name !== 'reset');
-    title.textContent = `${name === 'reset' ? '收银通运营工具' : ({ code: '码牌划转', device: '机具划拨', whitelist: '防切户白名单' } as Record<string, string>)[name]} v${VERSION}`;
+    title.textContent = `${name === 'reset' ? '运营工具' : ({ code: '码牌划转', device: '机具划拨', whitelist: '防切户白名单' } as Record<string, string>)[name]} v${VERSION}`;
   };
   const applyPreset = () => {
     const option = PRESETS[Number(preset.value)] || PRESETS[0];
@@ -272,6 +287,8 @@ function createPanel(api: LegacyApi): void {
     try {
       const merchantIds = parseMerchantIds(resetInput.value);
       const type = reportType.value as ReportType;
+      const businessLine = selectedBusinessLine();
+      const reportMode: ReportMode = businessLine === 'lhsd' ? 'COMMON' : 'SYT';
       const options = reportOptions();
       validateChannels(options);
       if (type === 'ALIPAY' && (options.subAppids || options.jsapiPaths)) {
@@ -280,11 +297,12 @@ function createPanel(api: LegacyApi): void {
       setBusy(true);
       renderResults([]);
       const useLegacy = hasCustomChannel(options);
-      setStatus(resetStatus, useLegacy ? '使用自定义渠道旧流程处理中' : '正在调用批量重置接口');
-      log(`开始${useLegacy ? '自定义渠道' : '批量'}重置: ${merchantIds.join('；')}`);
+      setStatus(resetStatus, useLegacy ? `使用${businessLineName(businessLine)}自定义渠道旧流程处理中` : `正在调用${businessLineName(businessLine)}批量重置接口`);
+      log(`开始${businessLineName(businessLine)}${useLegacy ? '自定义渠道' : '批量'}重置: ${merchantIds.join('；')}`);
+      const resetApi = businessLine === 'lhsd' ? getLegacyApi('lhsd') : api;
       const results = useLegacy
-        ? await runLegacyReset(api, merchantIds, type, options, log, renderResults)
-        : await runBatchReset(api, merchantIds, type, options, log);
+        ? await runLegacyReset(resetApi, merchantIds, type, options, log, renderResults, businessLine)
+        : await runBatchReset(resetApi, merchantIds, type, options, log, reportMode);
       renderResults(results);
       await copyCurrentResults(true);
       const failed = results.filter((item) => item.wechat.state === 'failure' || item.alipay.state === 'failure' || item.wechat.error || item.alipay.error).length;
@@ -294,6 +312,37 @@ function createPanel(api: LegacyApi): void {
       const message = error instanceof Error ? error.message : String(error);
       setStatus(resetStatus, message, true);
       log(`重置失败: ${message}`, true);
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  runPaymentConfig.addEventListener('click', async () => {
+    if (busy) return;
+    try {
+      const merchantIds = parseMerchantIds(resetInput.value);
+      if (merchantIds.length !== 1) throw new Error('配置绑定一次只能处理一个乐刷商户号');
+      const options = reportOptions();
+      if (!options.subAppids && !options.jsapiPaths) {
+        throw new Error('请至少填写 appid 或支付授权目录');
+      }
+      const bindingApi = getLegacyApi(selectedBusinessLine());
+      setBusy(true);
+      setStatus(resetStatus, '正在查询最新微信映射记录并配置绑定...');
+      log(`开始为商户 ${merchantIds[0]} 配置微信支付参数`);
+      const result = await bindingApi.bindLatestWechatPaymentConfig(merchantIds[0], {
+        ...options,
+        onConfigRow: (row: { fId?: string | number; fWxSubMchId?: string }) => {
+          log(`查询到最新微信映射记录：子商户号 ${row.fWxSubMchId || '-'}，id ${row.fId || '-'}`);
+        },
+      });
+      const id = (result as { id?: string }).id || '-';
+      setStatus(resetStatus, '微信支付参数绑定完成');
+      log(`商户 ${merchantIds[0]} 微信支付参数绑定完成，配置记录 id: ${id}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(resetStatus, message, true);
+      log(`配置绑定失败: ${message}`, true);
     } finally {
       setBusy(false);
     }
@@ -440,10 +489,16 @@ function createPanel(api: LegacyApi): void {
   applyPreset();
 }
 
+function getLegacyApi(businessLine: 'syt' | 'lhsd'): LegacyApi {
+  const apiName = businessLine === 'lhsd' ? 'lhsdAutoReport' : 'sytAutoReport';
+  const api = (window as unknown as Record<string, LegacyApi | undefined>)[apiName];
+  if (!api) throw new Error(`未加载${businessLineName(businessLine)}重置功能`);
+  return api;
+}
+
 function bootstrap(): void {
   if (window.top !== window.self) return;
-  const api = (window as unknown as { sytAutoReport?: LegacyApi }).sytAutoReport;
-  if (!api) return;
+  const api = getLegacyApi('syt');
   createPanel(api);
 }
 

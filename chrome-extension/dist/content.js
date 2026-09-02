@@ -23,9 +23,10 @@
   function readChannelResult(channel, response) {
     if (!response) return failure(`\u63A5\u53E3\u672A\u8FD4\u56DE${channel === "wechat" ? "\u5FAE\u4FE1" : "\u652F\u4ED8\u5B9D"}\u5904\u7406\u7ED3\u679C`);
     const data = response.data;
-    const success = String(response.respCode) === "0" && Number(data?.result) === 0;
-    const id = channel === "wechat" ? data?.wxMchId : data?.zfbSubMch;
-    if (!success) return failure(String(response.respMsg || data?.msg || "\u4E0A\u62A5\u5931\u8D25"));
+    const structuredData = typeof data === "object" && data !== null ? data : null;
+    const success = String(response.respCode) === "0" && (structuredData ? Number(structuredData.result) === 0 : Boolean(data));
+    const id = structuredData ? channel === "wechat" ? structuredData.wxMchId : structuredData.zfbSubMch : data;
+    if (!success) return failure(String(response.respMsg || structuredData?.msg || "\u4E0A\u62A5\u5931\u8D25"));
     if (!id || !/^\d+$/.test(String(id))) return failure("\u4E0A\u62A5\u6210\u529F\u4F46\u672A\u8FD4\u56DE\u5B50\u5546\u6237\u53F7");
     return { state: "success", subMchId: String(id) };
   }
@@ -50,11 +51,11 @@
       };
     });
   }
-  async function submitQuickReport(merchantIds, reportType, fetchImpl = fetch) {
+  async function submitQuickReport(merchantIds, reportType, reportMode = "SYT", fetchImpl = fetch) {
     const body = new URLSearchParams({
       merchantIds: merchantIds.join(";"),
       reportType,
-      reportMode: "SYT"
+      reportMode
     });
     const response = await fetchImpl("/lspos/atBatchTask.do?method=quickManualReport", {
       method: "POST",
@@ -135,8 +136,11 @@
       }
     }
   }
-  async function runBatchReset(api, merchantIds, reportType, options, log) {
-    const results = await submitQuickReport(merchantIds, reportType);
+  async function runBatchReset(api, merchantIds, reportType, options, log, reportMode = "SYT") {
+    const results = await submitQuickReport(merchantIds, reportType, reportMode);
+    results.forEach((result) => {
+      result.businessLine = reportMode === "COMMON" ? "lhsd" : "syt";
+    });
     if (isRequested(reportType, "wechat")) {
       await bindWechatPaymentConfigs(api, results, options, log);
     }
@@ -165,12 +169,13 @@
     }
     onUpdate([result]);
   }
-  async function runLegacyReset(api, merchantIds, reportType, options, log, onResultUpdate) {
+  async function runLegacyReset(api, merchantIds, reportType, options, log, onResultUpdate, businessLine = "syt") {
     const output = [];
     for (const merchantId of merchantIds) {
       const result = {
         merchantId,
         route: "legacy",
+        businessLine,
         wechat: isRequested(reportType, "wechat") ? pendingChannel() : skippedChannel(),
         alipay: isRequested(reportType, "alipay") ? pendingChannel() : skippedChannel()
       };
@@ -1052,8 +1057,9 @@
     }
     async function queryWxSubmchConfigRows(merchantId, wxSubMchId, options = {}) {
       assertMerchantId(merchantId);
-      if (!/^\d+$/.test(String(wxSubMchId || ""))) {
-        throw new Error("\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7\u4E0D\u80FD\u4E3A\u7A7A\uFF0C\u4E14\u5FC5\u987B\u4E3A\u6570\u5B57");
+      const normalizedWxSubMchId = String(wxSubMchId || "").trim();
+      if (normalizedWxSubMchId && !/^\d+$/.test(normalizedWxSubMchId)) {
+        throw new Error("\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7\u5FC5\u987B\u4E3A\u6570\u5B57");
       }
       const range = getAroundDateRange({ beforeDays: 1, afterDays: 1 });
       const body = buildFormBody({
@@ -1066,7 +1072,7 @@
         fUpdateTimeStart: "",
         fUpdateTimeEnd: "",
         fChannelId: "",
-        fWxSubMchId: wxSubMchId,
+        fWxSubMchId: normalizedWxSubMchId,
         fAgentId1g: "",
         fMerchantId: merchantId,
         fAuthorizeState: "",
@@ -1086,7 +1092,7 @@
       });
       const rows = Array.isArray(data.rows) ? data.rows : [];
       return rows.filter((row) => {
-        return normalizeText(row.fMerchantId) === String(merchantId) && normalizeText(row.fWxSubMchId) === String(wxSubMchId);
+        return normalizeText(row.fMerchantId) === String(merchantId) && (!normalizedWxSubMchId || normalizeText(row.fWxSubMchId) === normalizedWxSubMchId);
       });
     }
     function pickLatestWxSubmchConfigRow(rows) {
@@ -1128,6 +1134,20 @@
         message: text,
         html
       };
+    }
+    async function bindLatestWechatPaymentConfig(merchantId, options = {}) {
+      const range = getAroundDateRange({ beforeDays: 1825, afterDays: 1 });
+      const queryOptions = {
+        ...options,
+        fCreateTimeStart: options.fCreateTimeStart || range.createStartTime,
+        fCreateTimeEnd: options.fCreateTimeEnd || range.createEndTime,
+        rows: options.rows || "200"
+      };
+      const row = pickLatestWxSubmchConfigRow(await queryWxSubmchConfigRows(merchantId, "", queryOptions));
+      if (!row || !row.fId || !row.fWxSubMchId) {
+        throw new Error(`\u672A\u67E5\u8BE2\u5230\u5546\u6237 ${merchantId} \u7684\u5FAE\u4FE1\u6620\u5C04\u914D\u7F6E\u8BB0\u5F55 id`);
+      }
+      return bindWechatPaymentConfig(merchantId, String(row.fWxSubMchId), queryOptions);
     }
     function parseMappingHtml(html, type = "wechat") {
       const doc = new DOMParser().parseFromString(html, "text/html");
@@ -2967,8 +2987,7 @@
         return [
           `\u4E50\u5237\u5546\u6237\u53F7\uFF1A${input.value.trim()}`,
           wechatValue ? `\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7\uFF1A${wechatValue}` : "",
-          alipayValue ? `\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7\uFF1A${alipayValue}` : "",
-          "\u6E29\u99A8\u63D0\u793A\uFF1A\u91CD\u7F6E\u5B50\u5546\u6237\u53F7\uFF0C\u4EE3\u7406\u8BB0\u5F97\u81EA\u884C\u68C0\u67E5\u5546\u6237\u8D39\u7387\uFF0C2\u4E2A\u5DE5\u4F5C\u65E5\u5185\u53CD\u9988\uFF0C\u8BF7\u77E5\u6089\uFF01"
+          alipayValue ? `\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7\uFF1A${alipayValue}` : ""
         ].filter(Boolean).join("\n");
       };
       const refreshCopyButton = () => {
@@ -3431,6 +3450,7 @@
       resolveWechatChannelOptions,
       resolveAlipayChannelOptions,
       bindWechatPaymentConfig,
+      bindLatestWechatPaymentConfig,
       configureMerchantKey: configureMerchantKey2,
       enableOnlineReceipt: enableOnlineReceipt2,
       addMerchantChangeWhitelistItem,
@@ -3486,8 +3506,1849 @@
     }
   })();
 
+  // ../lhsd-submch-reset.user.js
+  (function() {
+    "use strict";
+    const ORIGIN = "https://om.leshuazf.com";
+    const SAAS = `${ORIGIN}/saasadmin`;
+    const STATUS = {
+      UNNOTIFIED: "\u672A\u901A\u77E5",
+      DISABLED: "\u7981\u7528",
+      ENABLED: "\u542F\u7528"
+    };
+    const CHANNEL_STATUS_FIELD = {
+      \u94F6\u8054: "unionStatus",
+      \u7F51\u8054: "nuccStatus",
+      \u7F51\u8054\u4E92\u8054\u4E92\u901A: "interconnectionStatus"
+    };
+    const STATUS_FIELD_CHANNEL = {
+      unionStatus: "\u94F6\u8054",
+      nuccStatus: "\u7F51\u8054",
+      interconnectionStatus: "\u7F51\u8054\u4E92\u8054\u4E92\u901A"
+    };
+    const WECHAT_PAYMENT_PRESETS = [
+      {
+        name: "\u7F8E\u56E2",
+        channelId: "755607656",
+        channelName: "\u5929\u6D25\u4E09\u5FEB\u98DE\u8DC3\u79D1\u6280\u6709\u9650\u516C\u53F8",
+        subAppids: "wx1fde2c33280d64b6;wx0e8672034309be8f",
+        jsapiPaths: "https://openpay.meituan.com/;https://openpay-zc.st.meituan.com/"
+      },
+      {
+        name: "\u4E50\u5E97\u5B9D",
+        channelId: "835134506",
+        channelName: "\u6DF1\u5733\u5BCC\u4E91\u6570\u79D1\u4FE1\u606F\u6280\u672F\u6709\u9650\u516C\u53F8",
+        subAppids: "wx76a4c0a8a9ef465b",
+        jsapiPaths: ""
+      }
+    ];
+    function pad(value) {
+      return String(value).padStart(2, "0");
+    }
+    function formatDateTime(date) {
+      return [
+        date.getFullYear(),
+        pad(date.getMonth() + 1),
+        pad(date.getDate())
+      ].join("-") + " " + [
+        pad(date.getHours()),
+        pad(date.getMinutes()),
+        pad(date.getSeconds())
+      ].join(":");
+    }
+    function getDateRange(options = {}) {
+      const end = /* @__PURE__ */ new Date();
+      const start = new Date(end);
+      if (options.years) {
+        start.setFullYear(start.getFullYear() - options.years);
+      } else {
+        start.setDate(start.getDate() - (options.days || 1));
+      }
+      return {
+        createStartTime: formatDateTime(start),
+        createEndTime: formatDateTime(end)
+      };
+    }
+    function getAroundDateRange(options = {}) {
+      const now = /* @__PURE__ */ new Date();
+      const start = new Date(now);
+      const end = new Date(now);
+      start.setDate(start.getDate() - (options.beforeDays || 1));
+      end.setDate(end.getDate() + (options.afterDays || 1));
+      return {
+        createStartTime: formatDateTime(start),
+        createEndTime: formatDateTime(end)
+      };
+    }
+    function getDefaultRange() {
+      return getDateRange({ days: 1 });
+    }
+    function uniqueBy(list, keyFn) {
+      const seen = /* @__PURE__ */ new Set();
+      const result = [];
+      list.forEach((item) => {
+        const key = keyFn(item);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        result.push(item);
+      });
+      return result;
+    }
+    function normalizeText(text) {
+      return String(text || "").replace(/\s+/g, " ").trim();
+    }
+    function buildFormBody(params) {
+      const body = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        body.set(key, value == null ? "" : String(value));
+      });
+      return body;
+    }
+    function getPageFetch() {
+      if (typeof unsafeWindow !== "undefined" && unsafeWindow.fetch) {
+        return unsafeWindow.fetch.bind(unsafeWindow);
+      }
+      return window.fetch.bind(window);
+    }
+    function summarizeHtml(html) {
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const title = normalizeText(doc.querySelector("title") ? doc.querySelector("title").textContent : "");
+      const body = normalizeText(doc.body ? doc.body.textContent : html);
+      const summary = [title ? `\u6807\u9898: ${title}` : "", body ? `\u6B63\u6587: ${body.slice(0, 260)}` : ""].filter(Boolean).join("\uFF1B");
+      return summary || html.slice(0, 260);
+    }
+    function getHtmlMessage(html) {
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      return normalizeText(doc.body ? doc.body.textContent : html);
+    }
+    function detectHtmlError(html) {
+      const message = getHtmlMessage(html);
+      if (message.includes("\u6CA1\u6709\u8BE5\u9879\u64CD\u4F5C\u6743\u9650")) {
+        return "\u6CA1\u6709\u8BE5\u9879\u64CD\u4F5C\u6743\u9650\uFF0C\u8BF7\u786E\u8BA4\u5F53\u524D\u8D26\u53F7\u5DF2\u5F00\u901A\u8BE5\u540E\u53F0\u64CD\u4F5C\u6743\u9650";
+      }
+      if (/登录|login|验证码/.test(message)) {
+        return "\u5F53\u524D\u767B\u5F55\u6001\u53EF\u80FD\u5DF2\u5931\u6548\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55\u8FD0\u8425\u540E\u53F0\u540E\u518D\u8BD5";
+      }
+      return "";
+    }
+    function looksLikeHtml(text) {
+      return /^\s*<!doctype html/i.test(text) || /^\s*<html[\s>]/i.test(text);
+    }
+    async function requestText(url, options = {}) {
+      const fetchImpl = getPageFetch();
+      const { accept, headers, ...fetchOptions } = options;
+      const response = await fetchImpl(url, {
+        credentials: "include",
+        redirect: "follow",
+        ...fetchOptions,
+        headers: {
+          Accept: accept || "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "X-Requested-With": "XMLHttpRequest",
+          ...headers || {}
+        }
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(`\u8BF7\u6C42\u5931\u8D25 ${response.status}: ${text.slice(0, 200)}`);
+      }
+      return text;
+    }
+    async function requestJson(url, options = {}) {
+      const text = await requestText(url, {
+        ...options,
+        accept: "application/json, text/javascript, */*; q=0.01",
+        headers: {
+          "Content-Type": "text/json,charset=utf-8",
+          ...options.headers || {}
+        }
+      });
+      try {
+        return JSON.parse(text);
+      } catch (error) {
+        const htmlError = looksLikeHtml(text) ? detectHtmlError(text) : "";
+        if (htmlError) throw new Error(htmlError);
+        const detail = looksLikeHtml(text) ? summarizeHtml(text) : text.slice(0, 260);
+        throw new Error(`JSON \u89E3\u6790\u5931\u8D25\uFF0C\u4E0A\u62A5\u63A5\u53E3\u8FD4\u56DE\u4E86\u975E JSON \u5185\u5BB9\u3002${detail}`);
+      }
+    }
+    function getReportDataObject(response) {
+      return response && response.data && typeof response.data === "object" ? response.data : {};
+    }
+    function assertReportBusinessSuccess(response, label) {
+      const reportData = getReportDataObject(response);
+      if (reportData.result != null && Number(reportData.result) !== 0) {
+        throw new Error(`${label}\u4E0A\u62A5\u5931\u8D25: ${reportData.msg || response.respMsg || JSON.stringify(response)}`);
+      }
+    }
+    function getOptionValue(options, key, defaultValue) {
+      return Object.prototype.hasOwnProperty.call(options, key) ? String(options[key] == null ? "" : options[key]) : defaultValue;
+    }
+    function hasWechatSytChannelOptions(options = {}) {
+      return Boolean(normalizeText(options.channelId) || normalizeText(options.channelName));
+    }
+    function hasAlipaySytChannelOptions(options = {}) {
+      return Boolean(normalizeText(options.sourcePid) || normalizeText(options.sourceName));
+    }
+    function hasWechatPaymentConfigOptions(options = {}) {
+      return Boolean(normalizeText(options.subAppids) || normalizeText(options.jsapiPaths));
+    }
+    function notifyProgress(options, type, step, status) {
+      if (options.onProgress) options.onProgress(type, step, status);
+    }
+    function notifyReportedSubMchId(options, type, subMchId) {
+      if (options.onReportedSubMchId) options.onReportedSubMchId(type, subMchId);
+    }
+    function parseLooseDateTime(value) {
+      const text = normalizeText(value);
+      if (!text) return 0;
+      return new Date(text.replace(/\.0$/, "").replace(" ", "T")).getTime() || 0;
+    }
+    async function submitWechatReport(merchantId, options = {}) {
+      assertMerchantId(merchantId);
+      const params = new URLSearchParams({
+        method: "posreport",
+        channelType: options.channelType || "2",
+        merchantId,
+        reportConfigId: options.reportConfigId || "",
+        forceReport: options.forceReport == null ? "1" : String(options.forceReport)
+      });
+      const data = await requestJson(`${SAAS}/wxsubmch.do?${params.toString()}`, {
+        method: "GET",
+        headers: {
+          Referer: `${SAAS}/wxsubmch.do?method=page`
+        }
+      });
+      if (Number(data.respCode) !== 0) {
+        throw new Error(`\u4E0A\u62A5\u5931\u8D25: ${data.respMsg || JSON.stringify(data)}`);
+      }
+      if (!/^\d+$/.test(String(data.data || ""))) {
+        throw new Error(`\u4E0A\u62A5\u63A5\u53E3\u672A\u8FD4\u56DE\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7: ${JSON.stringify(data)}`);
+      }
+      return data;
+    }
+    const reportMerchant = submitWechatReport;
+    async function submitSytWechatReport(merchantId, options = {}) {
+      assertMerchantId(merchantId);
+      const params = new URLSearchParams({
+        method: "posreport",
+        merchantId,
+        channelId: getOptionValue(options, "channelId", ""),
+        channelName: getOptionValue(options, "channelName", ""),
+        notice: options.notice == null ? "1" : String(options.notice),
+        mchId: options.mchId || "1502075691",
+        configType: options.configType == null ? "1" : String(options.configType),
+        payType: options.payType || "2"
+      });
+      const data = await requestJson(`${SAAS}/wxsubmch.do?${params.toString()}`, {
+        method: "GET",
+        headers: {
+          Referer: `${SAAS}/wxsubmch.do?method=page`
+        }
+      });
+      if (Number(data.respCode) !== 0) {
+        throw new Error(`\u6536\u94F6\u901A\u5FAE\u4FE1\u4E0A\u62A5\u5931\u8D25: ${data.respMsg || JSON.stringify(data)}`);
+      }
+      assertReportBusinessSuccess(data, "\u6536\u94F6\u901A\u5FAE\u4FE1");
+      const wxMchId = normalizeText(getReportDataObject(data).wxMchId || data.wxMchId || data.data);
+      if (!/^\d+$/.test(wxMchId)) {
+        throw new Error(`\u6536\u94F6\u901A\u5FAE\u4FE1\u4E0A\u62A5\u63A5\u53E3\u672A\u8FD4\u56DE\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7: ${JSON.stringify(data)}`);
+      }
+      return {
+        ...data,
+        rawData: data.data,
+        data: wxMchId,
+        wxMchId
+      };
+    }
+    async function submitAlipayReport(merchantId, options = {}) {
+      assertMerchantId(merchantId);
+      const params = new URLSearchParams({
+        method: "posreport",
+        channelType: options.channelType || "2",
+        merchantId,
+        reportConfigId: options.reportConfigId || "",
+        mccCode: options.mccCode || "",
+        forceReport: options.forceReport == null ? "1" : String(options.forceReport),
+        report4M3Flag: options.report4M3Flag == null ? "1" : String(options.report4M3Flag)
+      });
+      const data = await requestJson(`${SAAS}/zfbsubmch.do?${params.toString()}`, {
+        method: "GET",
+        headers: {
+          Referer: `${SAAS}/zfbsubmch.do?method=page`
+        }
+      });
+      if (Number(data.respCode) !== 0) {
+        throw new Error(`\u652F\u4ED8\u5B9D\u4E0A\u62A5\u5931\u8D25: ${data.respMsg || JSON.stringify(data)}`);
+      }
+      if (!/^\d+$/.test(String(data.data || ""))) {
+        throw new Error(`\u652F\u4ED8\u5B9D\u4E0A\u62A5\u63A5\u53E3\u672A\u8FD4\u56DE\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7: ${JSON.stringify(data)}`);
+      }
+      return data;
+    }
+    async function submitSytAlipayReport(merchantId, options = {}) {
+      assertMerchantId(merchantId);
+      const params = new URLSearchParams({
+        method: "posreport",
+        merchantId,
+        sourcePid: getOptionValue(options, "sourcePid", ""),
+        sourceName: getOptionValue(options, "sourceName", ""),
+        report4M3Flag: options.report4M3Flag == null ? "2" : String(options.report4M3Flag),
+        configType: options.configType || "",
+        notice: options.notice == null ? "1" : String(options.notice)
+      });
+      const data = await requestJson(`${SAAS}/zfbsubmch.do?${params.toString()}`, {
+        method: "GET",
+        headers: {
+          Referer: `${SAAS}/zfbsubmch.do?method=page`
+        }
+      });
+      if (Number(data.respCode) !== 0) {
+        throw new Error(`\u6536\u94F6\u901A\u652F\u4ED8\u5B9D\u4E0A\u62A5\u5931\u8D25: ${data.respMsg || JSON.stringify(data)}`);
+      }
+      assertReportBusinessSuccess(data, "\u6536\u94F6\u901A\u652F\u4ED8\u5B9D");
+      const zfbSubMch = normalizeText(getReportDataObject(data).zfbSubMch || data.zfbSubMch || data.data);
+      if (!/^\d+$/.test(zfbSubMch)) {
+        throw new Error(`\u6536\u94F6\u901A\u652F\u4ED8\u5B9D\u4E0A\u62A5\u63A5\u53E3\u672A\u8FD4\u56DE\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7: ${JSON.stringify(data)}`);
+      }
+      return {
+        ...data,
+        rawData: data.data,
+        data: zfbSubMch,
+        zfbSubMch
+      };
+    }
+    async function queryWechatMappings(merchantId, options = {}) {
+      assertMerchantId(merchantId);
+      const range = getDateRange({ days: 1 });
+      const body = buildFormBody({
+        createStartTime: options.createStartTime || range.createStartTime,
+        createEndTime: options.createEndTime || range.createEndTime,
+        payType: options.payType || "2",
+        status: options.status || "",
+        isDefault: options.isDefault || "",
+        source: options.source || "",
+        channelType: options.channelType || "",
+        updateStartTime: options.updateStartTime || "",
+        updateEndTime: options.updateEndTime || "",
+        agentId1g: options.agentId1g || "",
+        merchantId,
+        wxSubMchId: options.wxSubMchId || "",
+        nuccwxMchId: options.nuccwxMchId || "",
+        pageSize: options.pageSize || "200"
+      });
+      const html = await requestText(`${SAAS}/wechatMappingInfo.do?method=page`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+          Referer: `${SAAS}/wechatMappingInfo.do?method=page`
+        },
+        body
+      });
+      return parseMappingHtml(html, "wechat");
+    }
+    async function queryAlipayMappings(merchantId, options = {}) {
+      assertMerchantId(merchantId);
+      const range = getDateRange({ days: 1 });
+      const body = buildFormBody({
+        createStartTime: options.createStartTime || range.createStartTime,
+        createEndTime: options.createEndTime || range.createEndTime,
+        payType: options.payType || "2",
+        status: options.status || "",
+        isDefault: options.isDefault || "",
+        source: options.source || "",
+        channelType: options.channelType || "",
+        updateStartTime: options.updateStartTime || "",
+        updateEndTime: options.updateEndTime || "",
+        agentId1g: options.agentId1g || "",
+        merchantId,
+        zfbSubMchId: options.zfbSubMchId || "",
+        nuccZfbMchId: options.nuccZfbMchId || "",
+        pageSize: options.pageSize || "200"
+      });
+      const html = await requestText(`${SAAS}/alipayMappingInfo.do?method=page`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+          Referer: `${SAAS}/alipayMappingInfo.do?method=page`
+        },
+        body
+      });
+      return parseMappingHtml(html, "alipay");
+    }
+    async function queryWxSubmchConfigRows(merchantId, wxSubMchId, options = {}) {
+      assertMerchantId(merchantId);
+      const normalizedWxSubMchId = String(wxSubMchId || "").trim();
+      if (normalizedWxSubMchId && !/^\d+$/.test(normalizedWxSubMchId)) {
+        throw new Error("\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7\u5FC5\u987B\u4E3A\u6570\u5B57");
+      }
+      const range = getAroundDateRange({ beforeDays: 1, afterDays: 1 });
+      const body = buildFormBody({
+        fCreateTimeStart: options.fCreateTimeStart || range.createStartTime,
+        fCreateTimeEnd: options.fCreateTimeEnd || range.createEndTime,
+        fChannelType: "",
+        fPayType: "",
+        fStatus: "",
+        fCanTrade: "",
+        fUpdateTimeStart: "",
+        fUpdateTimeEnd: "",
+        fChannelId: "",
+        fWxSubMchId: normalizedWxSubMchId,
+        fAgentId1g: "",
+        fMerchantId: merchantId,
+        fAuthorizeState: "",
+        fInUse: "",
+        syncPlatform: "",
+        page: "1",
+        rows: options.rows || "15"
+      });
+      const data = await requestJson(`${SAAS}/wxsubmch.do?method=list`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          Origin: ORIGIN,
+          Referer: `${SAAS}/wxsubmch.do?method=page`
+        },
+        body
+      });
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      return rows.filter((row) => {
+        return normalizeText(row.fMerchantId) === String(merchantId) && (!normalizedWxSubMchId || normalizeText(row.fWxSubMchId) === normalizedWxSubMchId);
+      });
+    }
+    function pickLatestWxSubmchConfigRow(rows) {
+      return rows.slice().sort((left, right) => {
+        return parseLooseDateTime(right.fCreateTime) - parseLooseDateTime(left.fCreateTime);
+      })[0] || null;
+    }
+    async function bindWechatPaymentConfig(merchantId, wxSubMchId, options = {}) {
+      const rows = await queryWxSubmchConfigRows(merchantId, wxSubMchId, options);
+      const row = pickLatestWxSubmchConfigRow(rows);
+      if (!row || !row.fId) {
+        throw new Error(`\u672A\u67E5\u8BE2\u5230\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7 ${wxSubMchId} \u5BF9\u5E94\u7684\u914D\u7F6E\u8BB0\u5F55 id`);
+      }
+      const id = String(row.fId);
+      if (options.onConfigRow) options.onConfigRow(row);
+      const body = buildFormBody({
+        subAppids: getOptionValue(options, "subAppids", ""),
+        jsapiPaths: getOptionValue(options, "jsapiPaths", ""),
+        id,
+        isSubmitted: "1"
+      });
+      const html = await requestText(`${SAAS}/wxsubmch.do?method=configReport`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+          Referer: `${SAAS}/wxsubmch.do?method=getByReportConfigId&reportConfigId=0&id=${encodeURIComponent(id)}`
+        },
+        body
+      });
+      const text = summarizeHtml(html);
+      if (/没有该项操作权限|失败|错误|异常/.test(text)) {
+        throw new Error(`\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\u7ED1\u5B9A\u5931\u8D25: ${text}`);
+      }
+      return {
+        ok: true,
+        id,
+        row,
+        message: text,
+        html
+      };
+    }
+    async function bindLatestWechatPaymentConfig(merchantId, options = {}) {
+      const range = getAroundDateRange({ beforeDays: 1825, afterDays: 1 });
+      const queryOptions = {
+        ...options,
+        fCreateTimeStart: options.fCreateTimeStart || range.createStartTime,
+        fCreateTimeEnd: options.fCreateTimeEnd || range.createEndTime,
+        rows: options.rows || "200"
+      };
+      const row = pickLatestWxSubmchConfigRow(await queryWxSubmchConfigRows(merchantId, "", queryOptions));
+      if (!row || !row.fId || !row.fWxSubMchId) {
+        throw new Error(`\u672A\u67E5\u8BE2\u5230\u5546\u6237 ${merchantId} \u7684\u5FAE\u4FE1\u6620\u5C04\u914D\u7F6E\u8BB0\u5F55 id`);
+      }
+      return bindWechatPaymentConfig(merchantId, String(row.fWxSubMchId), queryOptions);
+    }
+    function parseMappingHtml(html, type = "wechat") {
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const subMchHeader = type === "alipay" ? "\u652F\u4ED8\u5B9D\u5546\u6237\u53F7" : "\u5FAE\u4FE1\u5546\u6237\u53F7";
+      const table = Array.from(doc.querySelectorAll("table.tablesorter")).find((item) => {
+        return normalizeText(item.textContent).includes(subMchHeader) && normalizeText(item.textContent).includes("\u901A\u77E5\u72B6\u6001");
+      });
+      if (!table) return [];
+      const headers = Array.from(table.querySelectorAll("thead th")).map((th) => normalizeText(th.textContent));
+      return Array.from(table.querySelectorAll("tbody tr")).map((tr) => {
+        const cells = Array.from(tr.querySelectorAll("td"));
+        const row = {};
+        headers.forEach((header, index) => {
+          row[header] = normalizeText(cells[index] ? cells[index].textContent : "");
+        });
+        const statusLink = cells[0] ? cells[0].querySelector('a[onclick*="getSetTradeStatusPage"]') : null;
+        const onclick = statusLink ? statusLink.getAttribute("onclick") || "" : "";
+        row.merchantId = row["\u4E50\u5237\u5546\u6237\u53F7"];
+        row.wxSubMchId = row["\u5FAE\u4FE1\u5546\u6237\u53F7"] || "";
+        row.zfbSubMchId = row["\u652F\u4ED8\u5B9D\u5546\u6237\u53F7"] || "";
+        row.subMchId = type === "alipay" ? row.zfbSubMchId : row.wxSubMchId;
+        row.nuccwxMchId = row["\u7F51\u8054\u5546\u6237\u53F7"] || "";
+        row.nuccZfbMchId = row["\u7F51\u8054\u5546\u6237\u53F7"] || "";
+        row.channel = row["\u901A\u9053"];
+        row.payTypeName = row["\u8D39\u7387\u7C7B\u578B"];
+        row.noticeStatus = row["\u901A\u77E5\u72B6\u6001"];
+        row.source = row["\u6765\u6E90"];
+        row.createTime = row["\u521B\u5EFA\u65F6\u95F4"];
+        row.updateTime = row["\u66F4\u65B0\u65F6\u95F4"];
+        row.payType = extractOnclickParam(onclick, "payType") || payTypeNameToCode(row.payTypeName);
+        return row;
+      }).filter((row) => row.merchantId || row.subMchId);
+    }
+    function extractOnclickParam(onclick, key) {
+      const reg = new RegExp(`${key}=\\+'([^']*)'`);
+      const match = onclick.match(reg);
+      return match ? match[1] : "";
+    }
+    function payTypeNameToCode(name) {
+      const map = {
+        \u7EBF\u4E0A: "1",
+        \u7EBF\u4E0B: "2",
+        \u516C\u7F34: "3",
+        \u516C\u76CA: "4",
+        \u4FDD\u9669: "5",
+        \u7EFF\u6D32: "6",
+        \u9AD8\u6821\u98DF\u5802: "7",
+        \u79C1\u7ACB\u4E2D\u5C0F\u5E7C: "8",
+        \u670D\u9970\u65E5\u5316: "9",
+        \u7EBF\u4E0A\u6279\u53D1: "10"
+      };
+      return map[normalizeText(name)] || "2";
+    }
+    function getChannelStatusField(channel) {
+      return CHANNEL_STATUS_FIELD[normalizeText(channel)] || "";
+    }
+    function getStatusName(statusValue) {
+      return String(statusValue) === "1" ? STATUS.ENABLED : STATUS.DISABLED;
+    }
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+    function groupRowsForTradeStatus(rows, targetStatusValue, subMchIdKey = "wxSubMchId") {
+      const groupMap = /* @__PURE__ */ new Map();
+      rows.forEach((row) => {
+        const subMchId = row[subMchIdKey] || row.subMchId;
+        if (!subMchId) return;
+        const key = `${subMchId}__${row.payType || "2"}`;
+        if (!groupMap.has(key)) {
+          groupMap.set(key, {
+            merchantId: row.merchantId,
+            subMchId,
+            wxSubMchId: row.wxSubMchId || "",
+            zfbSubMchId: row.zfbSubMchId || "",
+            payType: row.payType || "2",
+            rows: [],
+            statusParams: {}
+          });
+        }
+        const group = groupMap.get(key);
+        const field = getChannelStatusField(row.channel);
+        if (!field) return;
+        group.rows.push(row);
+        group.statusParams[field] = String(targetStatusValue);
+      });
+      return Array.from(groupMap.values()).filter((group) => Object.keys(group.statusParams).length > 0);
+    }
+    function pickRowsByStatus(rows, status) {
+      return rows.filter((row) => normalizeText(row.noticeStatus) === status);
+    }
+    function getRowChannelKey(rows) {
+      return rows.map((row) => normalizeText(row.channel)).filter(Boolean).sort().join("|");
+    }
+    function getPollOptions(options = {}) {
+      return {
+        startDelayMs: options.pollStartDelayMs == null ? 1e3 : options.pollStartDelayMs,
+        intervalMs: options.pollIntervalMs == null ? 2e3 : options.pollIntervalMs,
+        timeoutMs: options.pollTimeoutMs == null ? 3e4 : options.pollTimeoutMs,
+        settleMs: options.settleMs == null ? 2e3 : options.settleMs
+      };
+    }
+    async function queryWechatUnnotifiedOnce(merchantId, wxSubMchId, options = {}) {
+      const rows = await queryWechatMappings(merchantId, {
+        ...options,
+        wxSubMchId,
+        ...getDateRange({ days: 1 })
+      });
+      return {
+        rows,
+        unnotifiedRows: pickRowsByStatus(rows, STATUS.UNNOTIFIED)
+      };
+    }
+    function buildSetTradeStatusBody(merchantId, subMchParamName, subMchId, payType, statusParams) {
+      const params = {
+        merchantId,
+        [subMchParamName]: subMchId,
+        payType
+      };
+      Object.entries(statusParams).forEach(([key, value]) => {
+        if (value !== void 0 && value !== null && value !== "") {
+          params[key] = value;
+        }
+      });
+      params.submit = "\u63D0 \u4EA4";
+      return buildFormBody(params);
+    }
+    async function setWechatTradeStatus(merchantId, wxSubMchId, statusParams, options = {}) {
+      assertMerchantId(merchantId);
+      if (!/^\d+$/.test(String(wxSubMchId || ""))) {
+        throw new Error("\u5FAE\u4FE1\u5546\u6237\u53F7\u4E0D\u80FD\u4E3A\u7A7A\uFF0C\u4E14\u5FC5\u987B\u4E3A\u6570\u5B57");
+      }
+      if (!statusParams || Object.keys(statusParams).length === 0) {
+        throw new Error("\u81F3\u5C11\u9700\u8981\u4F20\u5165\u4E00\u4E2A\u901A\u9053\u72B6\u6001\u53C2\u6570");
+      }
+      const payType = options.payType || "2";
+      const body = buildSetTradeStatusBody(merchantId, "wxSubMchId", wxSubMchId, payType, statusParams);
+      const html = await requestText(`${SAAS}/wechatMappingInfo.do?method=setTradeStatus`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+          Referer: `${SAAS}/wechatMappingInfo.do?method=getSetTradeStatusPage&merchantId=${encodeURIComponent(merchantId)}&wxSubMchId=${encodeURIComponent(wxSubMchId)}&payType=${encodeURIComponent(payType)}`
+        },
+        body
+      });
+      return parseStatusResultHtml(html, statusParams);
+    }
+    const setTradeStatus = setWechatTradeStatus;
+    async function setAlipayTradeStatus(merchantId, zfbSubMchId, statusParams, options = {}) {
+      assertMerchantId(merchantId);
+      if (!/^\d+$/.test(String(zfbSubMchId || ""))) {
+        throw new Error("\u652F\u4ED8\u5B9D\u5546\u6237\u53F7\u4E0D\u80FD\u4E3A\u7A7A\uFF0C\u4E14\u5FC5\u987B\u4E3A\u6570\u5B57");
+      }
+      if (!statusParams || Object.keys(statusParams).length === 0) {
+        throw new Error("\u81F3\u5C11\u9700\u8981\u4F20\u5165\u4E00\u4E2A\u901A\u9053\u72B6\u6001\u53C2\u6570");
+      }
+      const payType = options.payType || "2";
+      const body = buildSetTradeStatusBody(merchantId, "zfbSubMchId", zfbSubMchId, payType, statusParams);
+      const html = await requestText(`${SAAS}/alipayMappingInfo.do?method=setTradeStatus`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+          Referer: `${SAAS}/alipayMappingInfo.do?method=getSetTradeStatusPage&merchantId=${encodeURIComponent(merchantId)}&zfbSubMchId=${encodeURIComponent(zfbSubMchId)}&payType=${encodeURIComponent(payType)}`
+        },
+        body
+      });
+      return parseStatusResultHtml(html, statusParams);
+    }
+    function parseStatusResultHtml(html, statusParams) {
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const text = normalizeText(doc.body ? doc.body.textContent : html);
+      const expectedTexts = Object.entries(statusParams || {}).map(([field, value]) => {
+        return `${STATUS_FIELD_CHANNEL[field] || ""}:${getStatusName(value)}\u6210\u529F`;
+      });
+      return {
+        ok: expectedTexts.length > 0 && expectedTexts.every((targetText) => text.includes(targetText)),
+        message: text,
+        html
+      };
+    }
+    async function setWechatStatusGroups(merchantId, groups, options = {}) {
+      assertMerchantId(merchantId);
+      const changedGroups = [];
+      for (const group of groups) {
+        if (options.onGroup) options.onGroup(group);
+        const result = await setWechatTradeStatus(merchantId, group.wxSubMchId || group.subMchId, group.statusParams, {
+          payType: group.payType
+        });
+        changedGroups.push({ ...group, result });
+        if (!result.ok) {
+          throw new Error(`\u8BBE\u7F6E ${group.wxSubMchId} \u672A\u786E\u8BA4\u6210\u529F: ${result.message}`);
+        }
+      }
+      return changedGroups;
+    }
+    async function setAlipayStatusGroups(merchantId, groups, options = {}) {
+      assertMerchantId(merchantId);
+      const changedGroups = [];
+      for (const group of groups) {
+        if (options.onGroup) options.onGroup(group);
+        const result = await setAlipayTradeStatus(merchantId, group.zfbSubMchId || group.subMchId, group.statusParams, {
+          payType: group.payType
+        });
+        changedGroups.push({ ...group, result });
+        if (!result.ok) {
+          throw new Error(`\u8BBE\u7F6E\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7 ${group.zfbSubMchId || group.subMchId} \u672A\u786E\u8BA4\u6210\u529F: ${result.message}`);
+        }
+      }
+      return changedGroups;
+    }
+    async function pollWechatNewMappings(merchantId, wxSubMchId, options = {}) {
+      assertMerchantId(merchantId);
+      const firstDelayMs = options.wechatFirstQueryDelayMs == null ? 3e3 : options.wechatFirstQueryDelayMs;
+      const confirmIntervalMs = options.wechatConfirmIntervalMs == null ? 1500 : options.wechatConfirmIntervalMs;
+      const timeoutMs = options.pollTimeoutMs == null ? 3e4 : options.pollTimeoutMs;
+      const startedAt = Date.now();
+      const snapshots = [];
+      await sleep(firstDelayMs);
+      while (Date.now() - startedAt <= timeoutMs) {
+        const snapshot = await queryWechatUnnotifiedOnce(merchantId, wxSubMchId, options);
+        snapshots.push(snapshot);
+        if (snapshots.length > 3) snapshots.shift();
+        const channelKeys2 = snapshots.map((item) => getRowChannelKey(item.unnotifiedRows));
+        if (snapshots.length === 3 && channelKeys2[0] && channelKeys2.every((channelKey) => channelKey === channelKeys2[0])) {
+          const lastSnapshot = snapshots[snapshots.length - 1];
+          return {
+            rows: lastSnapshot.rows,
+            unnotifiedRows: lastSnapshot.unnotifiedRows
+          };
+        }
+        await sleep(confirmIntervalMs);
+      }
+      const channelKeys = snapshots.map((snapshot) => getRowChannelKey(snapshot.unnotifiedRows));
+      throw new Error(`\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7 ${wxSubMchId} \u7684\u672A\u901A\u77E5\u901A\u9053\u672A\u5728\u8D85\u65F6\u65F6\u95F4\u5185\u7A33\u5B9A: ${channelKeys.join(" -> ") || "\u65E0"}`);
+    }
+    async function enableNewWechatMappings(merchantId, wxSubMchId, options = {}) {
+      const { rows, unnotifiedRows } = await pollWechatNewMappings(merchantId, wxSubMchId, options);
+      const groups = groupRowsForTradeStatus(unnotifiedRows, "1", "wxSubMchId");
+      if (groups.length === 0) {
+        throw new Error(`\u672A\u627E\u5230\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7 ${wxSubMchId} \u53EF\u542F\u7528\u7684\u901A\u9053`);
+      }
+      const changedGroups = await setWechatStatusGroups(merchantId, groups, options);
+      return {
+        rows,
+        unnotifiedRows,
+        groups,
+        changedGroups
+      };
+    }
+    async function pollWechatEnabledMappings(merchantId, wxSubMchId, options = {}) {
+      assertMerchantId(merchantId);
+      const firstDelayMs = options.wechatFirstQueryDelayMs == null ? 3e3 : options.wechatFirstQueryDelayMs;
+      const intervalMs = options.wechatConfirmIntervalMs == null ? 2e3 : options.wechatConfirmIntervalMs;
+      const maxRetries = options.wechatConfirmRetries == null ? 3 : options.wechatConfirmRetries;
+      await sleep(firstDelayMs);
+      for (let index = 0; index <= maxRetries; index += 1) {
+        if (index > 0) await sleep(intervalMs);
+        const rows = await queryWechatMappings(merchantId, {
+          ...options,
+          wxSubMchId,
+          ...getDateRange({ days: 1 })
+        });
+        const enabledRows = pickRowsByStatus(rows, STATUS.ENABLED);
+        if (enabledRows.length > 0) {
+          return { rows, enabledRows };
+        }
+      }
+      throw new Error(`\u8F6E\u8BE2\u8D85\u65F6\uFF0C\u672A\u67E5\u8BE2\u5230\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7 ${wxSubMchId} \u7684\u542F\u7528\u6620\u5C04\u8BB0\u5F55`);
+    }
+    async function confirmNewWechatMappings(merchantId, wxSubMchId, options = {}) {
+      return pollWechatEnabledMappings(merchantId, wxSubMchId, options);
+    }
+    async function disableOldEnabledWechatMappings(merchantId, newWxSubMchId, options = {}) {
+      const rows = await queryWechatMappings(merchantId, {
+        ...options,
+        wxSubMchId: "",
+        ...getDateRange({ years: 5 })
+      });
+      const enabledRows = rows.filter((row) => {
+        return row.wxSubMchId !== newWxSubMchId && normalizeText(row.noticeStatus) === STATUS.ENABLED;
+      });
+      const groups = groupRowsForTradeStatus(enabledRows, "0", "wxSubMchId");
+      const changedGroups = await setWechatStatusGroups(merchantId, groups, options);
+      return {
+        rows,
+        enabledRows,
+        groups,
+        changedGroups
+      };
+    }
+    async function pollAlipayNewMappings(merchantId, zfbSubMchId, options = {}) {
+      assertMerchantId(merchantId);
+      const { startDelayMs, intervalMs, timeoutMs, settleMs } = getPollOptions(options);
+      const startedAt = Date.now();
+      let firstEnabledAt = 0;
+      let lastChannelKey = "";
+      let stableChannelCount = 0;
+      let latestRows = [];
+      let latestEnabledRows = [];
+      await sleep(startDelayMs);
+      while (Date.now() - startedAt <= timeoutMs) {
+        const rows = await queryAlipayMappings(merchantId, {
+          ...options,
+          zfbSubMchId,
+          ...getDateRange({ days: 1 })
+        });
+        const enabledRows = pickRowsByStatus(rows, STATUS.ENABLED);
+        if (enabledRows.length > 0) {
+          const channelKey = getRowChannelKey(enabledRows);
+          latestRows = rows;
+          latestEnabledRows = enabledRows;
+          if (!firstEnabledAt) firstEnabledAt = Date.now();
+          if (channelKey === lastChannelKey) {
+            stableChannelCount += 1;
+          } else {
+            stableChannelCount = 1;
+            lastChannelKey = channelKey;
+          }
+          if (Date.now() - firstEnabledAt >= settleMs && stableChannelCount >= 2) {
+            return { rows: latestRows, enabledRows: latestEnabledRows };
+          }
+        }
+        await sleep(intervalMs);
+      }
+      if (latestEnabledRows.length > 0) {
+        return { rows: latestRows, enabledRows: latestEnabledRows };
+      }
+      throw new Error(`\u8F6E\u8BE2\u8D85\u65F6\uFF0C\u672A\u67E5\u8BE2\u5230\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7 ${zfbSubMchId} \u7684\u542F\u7528\u6620\u5C04\u8BB0\u5F55`);
+    }
+    async function confirmNewAlipayMappings(merchantId, zfbSubMchId, options = {}) {
+      return pollAlipayNewMappings(merchantId, zfbSubMchId, options);
+    }
+    async function disableOldEnabledAlipayMappings(merchantId, newZfbSubMchId, options = {}) {
+      const rows = await queryAlipayMappings(merchantId, {
+        ...options,
+        zfbSubMchId: "",
+        ...getDateRange({ years: 5 })
+      });
+      const enabledRows = rows.filter((row) => {
+        return row.zfbSubMchId !== newZfbSubMchId && normalizeText(row.noticeStatus) === STATUS.ENABLED;
+      });
+      const groups = groupRowsForTradeStatus(enabledRows, "0", "zfbSubMchId");
+      const changedGroups = await setAlipayStatusGroups(merchantId, groups, options);
+      return {
+        rows,
+        enabledRows,
+        groups,
+        changedGroups
+      };
+    }
+    async function wechatAutoReport(merchantId, options = {}) {
+      assertMerchantId(merchantId);
+      const logs = [];
+      const log = (message) => {
+        logs.push(`[${formatDateTime(/* @__PURE__ */ new Date())}] ${message}`);
+        if (options.onLog) options.onLog(message, logs.slice());
+      };
+      let report;
+      let newWxSubMchId;
+      const useSytReport = hasWechatSytChannelOptions(options);
+      try {
+        log(`\u5F00\u59CB\u5FAE\u4FE1\u4E0A\u62A5\u5546\u6237 ${merchantId}`);
+        log(`\u5FAE\u4FE1\u4E0A\u62A5\u6309\u94AE: ${useSytReport ? "\u6536\u94F6\u901A\u4E0A\u62A5" : "\u624B\u52A8\u4E0A\u62A5"}`);
+        if (useSytReport) {
+          log(`\u5FAE\u4FE1\u4E0A\u62A5\u6E20\u9053: ${getOptionValue(options, "channelId", "")} ${getOptionValue(options, "channelName", "")}`);
+        }
+        report = useSytReport ? await submitSytWechatReport(merchantId, options) : await submitWechatReport(merchantId, options);
+        newWxSubMchId = String(report.data);
+        log(`\u4E0A\u62A5\u4EFB\u52A1\u5DF2\u63D0\u4EA4\uFF0C\u8FD4\u56DE\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7: ${newWxSubMchId}`);
+        notifyReportedSubMchId(options, "wechat", newWxSubMchId);
+        notifyProgress(options, "wechat", "report", "success");
+      } catch (error) {
+        notifyProgress(options, "wechat", "report", "error");
+        throw error;
+      }
+      let enableResult = null;
+      let confirmResult = null;
+      try {
+        if (useSytReport) {
+          log("\u7B49\u5F85 3 \u79D2\u540E\u67E5\u8BE2\u65B0\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7\u542F\u7528\u72B6\u6001\uFF0C\u6CA1\u6709\u67E5\u5230\u5219\u6BCF\u9694 2 \u79D2\u91CD\u8BD5\uFF0C\u6700\u591A\u91CD\u8BD5 3 \u6B21");
+          confirmResult = await confirmNewWechatMappings(merchantId, newWxSubMchId, options);
+          log(`\u65B0\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7\u5DF2\u542F\u7528\uFF0C\u67E5\u8BE2\u5230 ${confirmResult.enabledRows.length} \u6761\u542F\u7528\u8BB0\u5F55`);
+        } else {
+          log("\u7B49\u5F85 3 \u79D2\u540E\u67E5\u8BE2\u65B0\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7\u6620\u5C04\u8BB0\u5F55\uFF0C\u5E76\u6BCF\u9694 1.5 \u79D2\u786E\u8BA4\u4E00\u6B21");
+          enableResult = await enableNewWechatMappings(merchantId, newWxSubMchId, {
+            ...options,
+            onGroup: (group) => {
+              const paramsText = Object.entries(group.statusParams).map(([key, value]) => `${key}=${value}`).join("&");
+              log(`\u542F\u7528\u65B0\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7 ${group.wxSubMchId}: ${paramsText}`);
+            }
+          });
+          log(`\u65B0\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7\u542F\u7528\u6210\u529F\uFF0C\u5904\u7406 ${enableResult.changedGroups.length} \u4E2A\u5206\u7EC4`);
+        }
+        notifyProgress(options, "wechat", "enable", "success");
+      } catch (error) {
+        notifyProgress(options, "wechat", "enable", "error");
+        throw error;
+      }
+      let disableResult;
+      try {
+        log("\u67E5\u8BE2 5 \u5E74\u5185\u65E7\u542F\u7528\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7\u5E76\u7981\u7528");
+        disableResult = await disableOldEnabledWechatMappings(merchantId, newWxSubMchId, {
+          ...options,
+          onGroup: (group) => {
+            const paramsText = Object.entries(group.statusParams).map(([key, value]) => `${key}=${value}`).join("&");
+            log(`\u7981\u7528\u65E7\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7 ${group.wxSubMchId}: ${paramsText}`);
+          }
+        });
+        log(`\u65E7\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7\u7981\u7528\u5B8C\u6210\uFF0C\u5904\u7406 ${disableResult.changedGroups.length} \u4E2A\u5206\u7EC4`);
+        notifyProgress(options, "wechat", "disable", "success");
+      } catch (error) {
+        notifyProgress(options, "wechat", "disable", "error");
+        throw error;
+      }
+      let paymentConfigResult = null;
+      if (hasWechatPaymentConfigOptions(options)) {
+        log("\u68C0\u6D4B\u5230\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\uFF0C\u5F00\u59CB\u7ED1\u5B9A appid / \u652F\u4ED8\u6388\u6743\u76EE\u5F55");
+        try {
+          paymentConfigResult = await bindWechatPaymentConfig(merchantId, newWxSubMchId, {
+            ...options,
+            onConfigRow: (row) => log(`\u67E5\u8BE2\u5230\u5FAE\u4FE1\u914D\u7F6E\u8BB0\u5F55 id: ${row.fId}`)
+          });
+          log("\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\u7ED1\u5B9A\u5B8C\u6210");
+        } catch (error) {
+          const errorMessage = `\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\u7ED1\u5B9A\u5931\u8D25: ${error.message}`;
+          paymentConfigResult = {
+            ok: false,
+            error: error.message
+          };
+          logs.push(`[${formatDateTime(/* @__PURE__ */ new Date())}] ${errorMessage}`);
+          if (options.onLog) options.onLog(errorMessage, true);
+        }
+      }
+      const result = {
+        merchantId,
+        report,
+        newWxSubMchId,
+        newReportedWxSubMchId: newWxSubMchId,
+        enableResult,
+        confirmResult,
+        disableResult,
+        paymentConfigResult,
+        logs
+      };
+      log(`\u5B8C\u6210\u3002\u65B0\u4E0A\u62A5\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7: ${newWxSubMchId}`);
+      return result;
+    }
+    const autoReport = wechatAutoReport;
+    async function alipayAutoReport(merchantId, options = {}) {
+      assertMerchantId(merchantId);
+      const logs = [];
+      const log = (message) => {
+        logs.push(`[${formatDateTime(/* @__PURE__ */ new Date())}] ${message}`);
+        if (options.onLog) options.onLog(message, logs.slice());
+      };
+      const useSytReport = hasAlipaySytChannelOptions(options);
+      let report;
+      let newZfbSubMchId;
+      try {
+        log(`\u5F00\u59CB\u652F\u4ED8\u5B9D\u4E0A\u62A5\u5546\u6237 ${merchantId}`);
+        log(`\u652F\u4ED8\u5B9D\u4E0A\u62A5\u6309\u94AE: ${useSytReport ? "\u6536\u94F6\u901A\u4E0A\u62A5" : "\u624B\u52A8\u4E0A\u62A5"}`);
+        if (useSytReport) {
+          log(`\u652F\u4ED8\u5B9D\u4E0A\u62A5\u6E20\u9053: ${getOptionValue(options, "sourcePid", "")} ${getOptionValue(options, "sourceName", "")}`);
+        }
+        report = useSytReport ? await submitSytAlipayReport(merchantId, options) : await submitAlipayReport(merchantId, options);
+        newZfbSubMchId = String(report.data);
+        log(`\u652F\u4ED8\u5B9D\u4E0A\u62A5\u4EFB\u52A1\u5DF2\u63D0\u4EA4\uFF0C\u8FD4\u56DE\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7: ${newZfbSubMchId}`);
+        notifyReportedSubMchId(options, "alipay", newZfbSubMchId);
+        notifyProgress(options, "alipay", "report", "success");
+      } catch (error) {
+        notifyProgress(options, "alipay", "report", "error");
+        throw error;
+      }
+      let confirmResult;
+      try {
+        log("\u7B49\u5F85 1 \u79D2\u540E\u8F6E\u8BE2\u65B0\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7\u6620\u5C04\u8BB0\u5F55");
+        confirmResult = await confirmNewAlipayMappings(merchantId, newZfbSubMchId, options);
+        log(`\u65B0\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7\u5DF2\u542F\u7528\uFF0C\u67E5\u8BE2\u5230 ${confirmResult.enabledRows.length} \u6761\u542F\u7528\u8BB0\u5F55`);
+        notifyProgress(options, "alipay", "enable", "success");
+      } catch (error) {
+        notifyProgress(options, "alipay", "enable", "error");
+        throw error;
+      }
+      let disableResult;
+      try {
+        log("\u67E5\u8BE2 5 \u5E74\u5185\u65E7\u542F\u7528\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7\u5E76\u7981\u7528");
+        disableResult = await disableOldEnabledAlipayMappings(merchantId, newZfbSubMchId, {
+          ...options,
+          onGroup: (group) => {
+            const paramsText = Object.entries(group.statusParams).map(([key, value]) => `${key}=${value}`).join("&");
+            log(`\u7981\u7528\u65E7\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7 ${group.zfbSubMchId || group.subMchId}: ${paramsText}`);
+          }
+        });
+        log(`\u65E7\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7\u7981\u7528\u5B8C\u6210\uFF0C\u5904\u7406 ${disableResult.changedGroups.length} \u4E2A\u5206\u7EC4`);
+        notifyProgress(options, "alipay", "disable", "success");
+      } catch (error) {
+        notifyProgress(options, "alipay", "disable", "error");
+        throw error;
+      }
+      if (hasWechatPaymentConfigOptions(options)) {
+        log("\u68C0\u6D4B\u5230\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\uFF0C\u4F46\u672C\u6B21\u672A\u4EA7\u751F\u65B0\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7\uFF0C\u8DF3\u8FC7\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\u7ED1\u5B9A");
+      }
+      const result = {
+        merchantId,
+        report,
+        newZfbSubMchId,
+        newReportedZfbSubMchId: newZfbSubMchId,
+        confirmResult,
+        disableResult,
+        logs
+      };
+      log(`\u5B8C\u6210\u3002\u65B0\u4E0A\u62A5\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7: ${newZfbSubMchId}`);
+      return result;
+    }
+    async function allAutoReport(merchantId, options = {}) {
+      const logs = [];
+      const onLog = (message, isError) => {
+        logs.push(`[${formatDateTime(/* @__PURE__ */ new Date())}] ${message}`);
+        if (options.onLog) options.onLog(message, isError === true);
+      };
+      const [wechatState, alipayState] = await Promise.allSettled([
+        wechatAutoReport(merchantId, { ...options, onLog }),
+        alipayAutoReport(merchantId, { ...options, onLog })
+      ]);
+      const failures = [wechatState, alipayState].filter((state) => state.status === "rejected").map((state) => state.reason?.message || String(state.reason));
+      if (failures.length > 0) {
+        throw new Error(`\u5168\u90E8\u91CD\u7F6E\u5B58\u5728\u5931\u8D25\u6D41\u7A0B: ${failures.join("; ")}`);
+      }
+      const wechatResult = wechatState.value;
+      const alipayResult = alipayState.value;
+      return {
+        merchantId,
+        wechatResult,
+        alipayResult,
+        newWxSubMchId: wechatResult.newWxSubMchId,
+        newZfbSubMchId: alipayResult.newZfbSubMchId,
+        logs
+      };
+    }
+    function assertMerchantId(merchantId) {
+      if (!/^\d{10}$/.test(String(merchantId || ""))) {
+        throw new Error("\u4E50\u5237\u5546\u6237\u53F7\u4E0D\u80FD\u4E3A\u7A7A\uFF0C\u4E14\u5FC5\u987B\u4E3A 10 \u4F4D\u6570\u5B57");
+      }
+    }
+    async function copyText2(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    }
+    function createPanel2() {
+      if (document.getElementById("lhsd-auto-report-panel")) return;
+      const style = document.createElement("style");
+      style.textContent = `
+      #lhsd-auto-report-panel {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        z-index: 2147483647;
+        font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      #lhsd-auto-report-panel * { box-sizing: border-box; }
+      #lhsd-auto-report-panel .float-ball {
+        display: none;
+        width: 52px;
+        height: 52px;
+        border: 1px solid #9ec5fe;
+        border-radius: 50%;
+        color: #fff;
+        background: #1f6feb;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, .22);
+        cursor: pointer;
+        font-weight: 700;
+        line-height: 1.15;
+      }
+      #lhsd-auto-report-panel.collapsed .float-ball {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #lhsd-auto-report-panel .panel-window {
+        width: 360px;
+        color: #1f2937;
+        background: #fff;
+        border: 1px solid #d1d5db;
+        box-shadow: 0 12px 32px rgba(15, 23, 42, .18);
+      }
+      #lhsd-auto-report-panel.collapsed .panel-window {
+        display: none;
+      }
+      #lhsd-auto-report-panel .panel-window header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        color: #fff;
+        background: #1f6feb;
+        font-weight: 700;
+      }
+      #lhsd-auto-report-panel button {
+        height: 30px;
+        border: 1px solid #c7d2fe;
+        background: #eff6ff;
+        color: #1d4ed8;
+        cursor: pointer;
+      }
+      #lhsd-auto-report-panel button:disabled {
+        cursor: not-allowed;
+        color: #6b7280;
+        background: #f3f4f6;
+        border-color: #d1d5db;
+      }
+      #lhsd-auto-report-panel .body { padding: 12px; }
+      #lhsd-auto-report-panel input {
+        min-width: 0;
+        width: 100%;
+        height: 30px;
+        padding: 4px 8px;
+        border: 1px solid #d1d5db;
+        background: #fff;
+        background-image: none;
+        box-shadow: none;
+        color: #111827;
+        font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+        font-weight: 400;
+        opacity: 1;
+        text-shadow: none;
+        -webkit-font-smoothing: antialiased;
+        filter: none;
+      }
+      #lhsd-auto-report-panel input::placeholder {
+        color: #6b7280;
+        opacity: 1;
+        text-shadow: none;
+      }
+      #lhsd-auto-report-panel .merchant-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+      }
+      #lhsd-auto-report-panel .merchant-row button {
+        min-width: 64px;
+      }
+      #lhsd-auto-report-panel .optional-title {
+        margin-top: 10px;
+        color: #374151;
+        font-weight: 700;
+      }
+      #lhsd-auto-report-panel .optional-title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      #lhsd-auto-report-panel .optional-title-row .optional-title {
+        margin-top: 0;
+      }
+      #lhsd-auto-report-panel .preset-select {
+        min-width: 116px;
+        height: 28px;
+        border: 1px solid #c7d2fe;
+        background: #eff6ff;
+        color: #1d4ed8;
+        cursor: pointer;
+        font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      }
+      #lhsd-auto-report-panel .optional-content {
+        display: none;
+      }
+      #lhsd-auto-report-panel .optional-content.open {
+        display: block;
+      }
+      #lhsd-auto-report-panel .optional-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      #lhsd-auto-report-panel .optional-row.single {
+        grid-template-columns: 1fr;
+      }
+      #lhsd-auto-report-panel .optional-field {
+        display: grid;
+        grid-template-columns: 86px 1fr;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      #lhsd-auto-report-panel .optional-field label {
+        color: #374151;
+        font-weight: 700;
+        line-height: 30px;
+      }
+      #lhsd-auto-report-panel pre {
+        height: 168px;
+        margin: 10px 0 0;
+        padding: 8px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+      }
+      #lhsd-auto-report-panel .log-line.error {
+        color: #dc2626;
+        font-weight: 700;
+      }
+      #lhsd-auto-report-panel .actions {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      #lhsd-auto-report-panel .log-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 8px;
+      }
+      #lhsd-auto-report-panel .log-actions button {
+        min-width: 96px;
+      }
+      #lhsd-auto-report-panel .result-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        align-items: stretch;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      #lhsd-auto-report-panel .result-progress {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 2px;
+        min-width: 0;
+      }
+      #lhsd-auto-report-panel .progress-step {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 0;
+        padding: 3px 2px;
+        color: #6b7280;
+        background: #e5e7eb;
+        border: 1px solid #d1d5db;
+        font-size: 11px;
+        line-height: 1.2;
+        text-align: center;
+        word-break: break-all;
+      }
+      #lhsd-auto-report-panel .progress-step.success {
+        color: #fff;
+        background: #16a34a;
+        border-color: #15803d;
+      }
+      #lhsd-auto-report-panel .progress-step.error {
+        color: #fff;
+        background: #dc2626;
+        border-color: #b91c1c;
+      }
+      #lhsd-auto-report-panel .progress-step.running {
+        color: #78350f;
+        background: #fef3c7;
+        border-color: #f59e0b;
+      }
+      #lhsd-auto-report-panel .progress-step.retryable {
+        cursor: pointer;
+      }
+      #lhsd-auto-report-panel .progress-step.retryable:hover {
+        filter: brightness(1.08);
+        box-shadow: 0 0 0 1px rgba(185, 28, 28, .28);
+      }
+      #lhsd-auto-report-panel .copy-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      #lhsd-auto-report-panel .copy-actions button {
+        min-width: 96px;
+      }
+      #lhsd-auto-report-panel .log-section {
+        display: block;
+      }
+      #lhsd-auto-report-panel .log-section:not(.open) pre {
+        height: 34px;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      #lhsd-auto-report-panel .log-section:not(.open) .log-line {
+        display: none;
+      }
+      #lhsd-auto-report-panel .log-section:not(.open) .log-line:last-child {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #lhsd-auto-report-panel .log-section:not(.open) .log-actions {
+        display: none;
+      }
+      #lhsd-auto-report-panel .result-label {
+        margin-top: 10px;
+        color: #374151;
+        font-weight: 700;
+      }
+      #lhsd-auto-report-panel #om-auto-report-result {
+        background: #fff;
+        color: #111827;
+      }
+      #lhsd-auto-report-panel .close {
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        color: #fff;
+        border: 1px solid rgba(255,255,255,.4);
+        background: transparent;
+      }
+    `;
+      document.head.appendChild(style);
+      const panel = document.createElement("div");
+      panel.id = "lhsd-auto-report-panel";
+      panel.className = "collapsed";
+      panel.innerHTML = `
+      <button class="float-ball" type="button" title="\u6253\u5F00\u5B50\u5546\u6237\u53F7\u81EA\u52A8\u91CD\u7F6E">\u91CD\u7F6E</button>
+      <div class="panel-window">
+        <header>
+          <span>\u5B50\u5546\u6237\u53F7\u81EA\u52A8\u91CD\u7F6E</span>
+          <button class="close" type="button" title="\u6536\u8D77">x</button>
+        </header>
+        <div class="body">
+          <div class="merchant-row">
+            <input id="om-auto-report-merchant" type="text" inputmode="numeric" placeholder="\u4E50\u5237\u5546\u6237\u53F7">
+            <button id="om-auto-report-merchant-clear" type="button">\u6E05\u7A7A</button>
+          </div>
+          <div class="optional-title-row">
+            <div class="optional-title">\u53EF\u9009\u53C2\u6570</div>
+            <select id="lhsd-preset-select" class="preset-select" title="\u9009\u62E9\u9884\u8BBE\u914D\u7F6E">
+              <option value="none">\u65E0</option>
+              <option value="custom">\u81EA\u5B9A\u4E49</option>
+              ${WECHAT_PAYMENT_PRESETS.map((preset, index) => `
+                <option value="preset-${index}">${preset.name}</option>
+              `).join("")}
+            </select>
+          </div>
+          <div id="lhsd-optional-content" class="optional-content">
+            <div class="optional-title">\u5FAE\u4FE1\u4E0A\u62A5\u6E20\u9053\u53F7</div>
+            <div class="optional-row">
+              <input id="lhsd-wx-channel-id" type="text" placeholder="\u6E20\u9053\u53F7">
+              <input id="lhsd-wx-channel-name" type="text" placeholder="\u6E20\u9053\u53F7\u4E3B\u4F53">
+            </div>
+            <div class="optional-title">\u652F\u4ED8\u5B9D\u4E0A\u62A5\u6E20\u9053\u53F7</div>
+            <div class="optional-row">
+              <input id="lhsd-alipay-channel-id" type="text" placeholder="\u6E20\u9053\u53F7">
+              <input id="lhsd-alipay-channel-name" type="text" placeholder="\u6E20\u9053\u53F7\u4E3B\u4F53">
+            </div>
+            <div class="optional-title">\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570</div>
+            <div class="optional-field">
+              <label for="lhsd-appid">appid</label>
+              <input id="lhsd-appid" type="text" placeholder="appid">
+            </div>
+            <div class="optional-field">
+              <label for="lhsd-pay-auth-dir">\u652F\u4ED8\u6388\u6743\u76EE\u5F55</label>
+              <input id="lhsd-pay-auth-dir" type="text" placeholder="\u652F\u4ED8\u6388\u6743\u76EE\u5F55">
+            </div>
+          </div>
+          <div class="actions">
+            <button id="om-auto-report-wechat" type="button">\u5FAE\u4FE1\u91CD\u7F6E\u5B50\u5546\u6237\u53F7</button>
+            <button id="om-auto-report-alipay" type="button">\u652F\u4ED8\u5B9D\u91CD\u7F6E\u5B50\u5546\u6237\u53F7</button>
+            <button id="om-auto-report-all" type="button">\u5168\u90E8\u91CD\u7F6E\u5B50\u5546\u6237\u53F7</button>
+          </div>
+          <div class="result-label">\u65B0\u4E0A\u62A5\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7</div>
+          <div class="result-row">
+            <input id="om-auto-report-result" type="text" readonly placeholder="\u6267\u884C\u6210\u529F\u540E\u663E\u793A">
+            <div id="om-auto-report-wechat-progress" class="result-progress" aria-label="\u5FAE\u4FE1\u91CD\u7F6E\u8FDB\u5EA6">
+              <span class="progress-step" data-step="report">\u4E0A\u62A5</span>
+              <span class="progress-step" data-step="enable">\u542F\u7528\u5B50\u5546\u6237\u53F7</span>
+              <span class="progress-step" data-step="disable">\u7981\u7528\u65E7\u5B50\u5546\u6237\u53F7</span>
+            </div>
+          </div>
+          <div class="result-label">\u65B0\u4E0A\u62A5\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7</div>
+          <div class="result-row">
+            <input id="om-auto-report-alipay-result" type="text" readonly placeholder="\u6267\u884C\u6210\u529F\u540E\u663E\u793A">
+            <div id="om-auto-report-alipay-progress" class="result-progress" aria-label="\u652F\u4ED8\u5B9D\u91CD\u7F6E\u8FDB\u5EA6">
+              <span class="progress-step" data-step="report">\u4E0A\u62A5</span>
+              <span class="progress-step" data-step="enable">\u542F\u7528\u5B50\u5546\u6237\u53F7</span>
+              <span class="progress-step" data-step="disable">\u7981\u7528\u65E7\u5B50\u5546\u6237\u53F7</span>
+            </div>
+          </div>
+          <div class="copy-actions">
+            <button id="om-auto-report-log-toggle" type="button">\u5C55\u5F00\u65E5\u5FD7</button>
+            <button id="om-auto-report-copy" type="button" disabled>\u590D\u5236</button>
+          </div>
+          <div id="om-auto-report-log-section" class="log-section">
+            <pre id="om-auto-report-log"></pre>
+            <div class="log-actions">
+              <button id="om-auto-report-clear" type="button">\u6E05\u7A7A\u65E5\u5FD7</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+      document.body.appendChild(panel);
+      const floatBall = panel.querySelector(".float-ball");
+      const input = panel.querySelector("#om-auto-report-merchant");
+      const merchantClearButton = panel.querySelector("#om-auto-report-merchant-clear");
+      const wxChannelIdInput = panel.querySelector("#lhsd-wx-channel-id");
+      const wxChannelNameInput = panel.querySelector("#lhsd-wx-channel-name");
+      const alipayChannelIdInput = panel.querySelector("#lhsd-alipay-channel-id");
+      const alipayChannelNameInput = panel.querySelector("#lhsd-alipay-channel-name");
+      const appidInput = panel.querySelector("#lhsd-appid");
+      const payAuthDirInput = panel.querySelector("#lhsd-pay-auth-dir");
+      const logBox = panel.querySelector("#om-auto-report-log");
+      const wechatButton = panel.querySelector("#om-auto-report-wechat");
+      const alipayButton = panel.querySelector("#om-auto-report-alipay");
+      const allButton = panel.querySelector("#om-auto-report-all");
+      const clearButton = panel.querySelector("#om-auto-report-clear");
+      const resultInput = panel.querySelector("#om-auto-report-result");
+      const copyButton = panel.querySelector("#om-auto-report-copy");
+      const alipayResultInput = panel.querySelector("#om-auto-report-alipay-result");
+      const closeButton = panel.querySelector(".close");
+      const presetSelect = panel.querySelector("#lhsd-preset-select");
+      const optionalContent = panel.querySelector("#lhsd-optional-content");
+      const logToggleButton = panel.querySelector("#om-auto-report-log-toggle");
+      const logSection = panel.querySelector("#om-auto-report-log-section");
+      const wechatProgress = panel.querySelector("#om-auto-report-wechat-progress");
+      const alipayProgress = panel.querySelector("#om-auto-report-alipay-progress");
+      const pageMerchantInput = document.querySelector('input[name="merchantId"], #merchantId');
+      if (pageMerchantInput && pageMerchantInput.value) input.value = pageMerchantInput.value.trim();
+      const retryContexts = {
+        wechat: null,
+        alipay: null
+      };
+      let busy = false;
+      const appendLog = (line, isError = false) => {
+        const time = formatDateTime(/* @__PURE__ */ new Date());
+        const row = document.createElement("div");
+        row.className = isError === true ? "log-line error" : "log-line";
+        row.textContent = `[${time}] ${line}`;
+        row.title = row.textContent;
+        logBox.appendChild(row);
+        logBox.scrollTop = logBox.scrollHeight;
+      };
+      const setBusy = (nextBusy) => {
+        busy = Boolean(nextBusy);
+        wechatButton.disabled = busy;
+        alipayButton.disabled = busy;
+        allButton.disabled = busy;
+        merchantClearButton.disabled = busy;
+        refreshProgressRetryability("wechat");
+        refreshProgressRetryability("alipay");
+      };
+      const getReportOptions = () => {
+        return {
+          channelId: wxChannelIdInput.value.trim(),
+          channelName: wxChannelNameInput.value.trim(),
+          sourcePid: alipayChannelIdInput.value.trim(),
+          sourceName: alipayChannelNameInput.value.trim(),
+          subAppids: appidInput.value.trim(),
+          jsapiPaths: payAuthDirInput.value.trim()
+        };
+      };
+      const getCopyText = () => {
+        const wechatValue = resultInput.value.trim();
+        const alipayValue = alipayResultInput.value.trim();
+        if (!wechatValue && !alipayValue) return "";
+        return [
+          `\u4E50\u5237\u5546\u6237\u53F7\uFF1A${input.value.trim()}`,
+          wechatValue ? `\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7\uFF1A${wechatValue}` : "",
+          alipayValue ? `\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7\uFF1A${alipayValue}` : "",
+          "\u6E29\u99A8\u63D0\u793A\uFF1A\u91CD\u7F6E\u5B50\u5546\u6237\u53F7\uFF0C\u4EE3\u7406\u8BB0\u5F97\u81EA\u884C\u68C0\u67E5\u5546\u6237\u8D39\u7387\uFF0C2\u4E2A\u5DE5\u4F5C\u65E5\u5185\u53CD\u9988\uFF0C\u8BF7\u77E5\u6089\uFF01"
+        ].filter(Boolean).join("\n");
+      };
+      const refreshCopyButton = () => {
+        copyButton.disabled = !getCopyText();
+      };
+      const resetResultOutputs = () => {
+        resultInput.value = "";
+        alipayResultInput.value = "";
+        refreshCopyButton();
+      };
+      const getProgressContainer = (type) => type === "alipay" ? alipayProgress : wechatProgress;
+      const getTypeName = (type) => type === "alipay" ? "\u652F\u4ED8\u5B9D" : "\u5FAE\u4FE1";
+      const getResultInput = (type) => type === "alipay" ? alipayResultInput : resultInput;
+      const createRetryContext = (type, merchantId, newSubMchId, reportOptions) => {
+        retryContexts[type] = {
+          type,
+          merchantId,
+          newSubMchId,
+          useSytReport: type === "wechat" ? hasWechatSytChannelOptions(reportOptions) : hasAlipaySytChannelOptions(reportOptions),
+          reportOptions: { ...reportOptions },
+          completedSteps: {
+            report: true,
+            enable: false,
+            disable: false
+          },
+          failedStep: null
+        };
+        refreshProgressRetryability(type);
+      };
+      const updateRetryContext = (type, step, status) => {
+        const context = retryContexts[type];
+        if (!context) return;
+        if (status === "success") {
+          context.completedSteps[step] = true;
+          if (context.failedStep === step) context.failedStep = null;
+        } else if (status === "error") {
+          context.completedSteps[step] = false;
+          context.failedStep = step;
+        }
+      };
+      const canRetryProgressStep = (type, step) => {
+        const context = retryContexts[type];
+        if (busy || !context || step !== "enable" && step !== "disable") return false;
+        if (step === "enable") return context.completedSteps.report && context.failedStep === "enable";
+        return context.completedSteps.enable && context.failedStep === "disable";
+      };
+      const refreshProgressRetryability = (type) => {
+        getProgressContainer(type).querySelectorAll(".progress-step").forEach((stepElement) => {
+          const step = stepElement.dataset.step;
+          const retryable = stepElement.classList.contains("error") && canRetryProgressStep(type, step);
+          stepElement.classList.toggle("retryable", retryable);
+          if (retryable) {
+            stepElement.title = "\u70B9\u51FB\u91CD\u8BD5\u6B64\u6B65\u9AA4";
+          } else if (step === "report" && stepElement.classList.contains("error")) {
+            stepElement.title = "\u4E0A\u62A5\u5931\u8D25\uFF0C\u8BF7\u91CD\u65B0\u6267\u884C\u5B8C\u6574\u91CD\u7F6E";
+          } else {
+            stepElement.removeAttribute("title");
+          }
+        });
+      };
+      const setProgressStep = (type, step, status) => {
+        const target = getProgressContainer(type).querySelector(`[data-step="${step}"]`);
+        if (!target) return;
+        target.classList.remove("success", "error", "running", "retryable");
+        if (status === "success" || status === "error" || status === "running") target.classList.add(status);
+        updateRetryContext(type, step, status);
+        refreshProgressRetryability(type);
+      };
+      const resetProgress = (type) => {
+        getProgressContainer(type).querySelectorAll(".progress-step").forEach((step) => {
+          step.classList.remove("success", "error", "running", "retryable");
+          step.removeAttribute("title");
+        });
+      };
+      const resetTaskState = () => {
+        retryContexts.wechat = null;
+        retryContexts.alipay = null;
+        resetResultOutputs();
+        resetProgress("wechat");
+        resetProgress("alipay");
+      };
+      const markFirstPendingProgressError = (type) => {
+        const target = Array.from(getProgressContainer(type).querySelectorAll(".progress-step")).find((step) => {
+          return !step.classList.contains("success") && !step.classList.contains("error");
+        });
+        if (target) setProgressStep(type, target.dataset.step, "error");
+      };
+      const setReportedSubMchId = (type, merchantId, subMchId, reportOptions) => {
+        const targetInput = getResultInput(type);
+        targetInput.value = subMchId;
+        refreshCopyButton();
+        createRetryContext(type, merchantId, subMchId, reportOptions);
+        appendLog(`\u65B0\u4E0A\u62A5${getTypeName(type)}\u5B50\u5546\u6237\u53F7\u5DF2\u5199\u5165\u8F93\u51FA\u6846: ${subMchId}`);
+      };
+      const clearOptionalInputs = () => {
+        wxChannelIdInput.value = "";
+        wxChannelNameInput.value = "";
+        alipayChannelIdInput.value = "";
+        alipayChannelNameInput.value = "";
+        appidInput.value = "";
+        payAuthDirInput.value = "";
+      };
+      const setOptionalContentOpen = (open) => {
+        optionalContent.classList.toggle("open", open);
+      };
+      const setLogSectionOpen = (open) => {
+        logSection.classList.toggle("open", open);
+        logToggleButton.textContent = open ? "\u6536\u8D77\u65E5\u5FD7" : "\u5C55\u5F00\u65E5\u5FD7";
+      };
+      const applyWechatPaymentPreset = (preset) => {
+        wxChannelIdInput.value = preset.channelId;
+        wxChannelNameInput.value = preset.channelName;
+        appidInput.value = preset.subAppids;
+        payAuthDirInput.value = preset.jsapiPaths;
+        appendLog(`\u5DF2\u9009\u62E9\u9884\u8BBE\u914D\u7F6E: ${preset.name}`);
+      };
+      const buildFlowOptions = (type, merchantId, reportOptions) => {
+        return {
+          ...reportOptions,
+          onLog: appendLog,
+          onProgress: setProgressStep,
+          onReportedSubMchId: (reportedType, subMchId) => {
+            setReportedSubMchId(reportedType, merchantId, subMchId, reportOptions);
+          }
+        };
+      };
+      const retryDisableOldMappings = async (context) => {
+        const typeName = getTypeName(context.type);
+        setProgressStep(context.type, "disable", "running");
+        appendLog(`\u5F00\u59CB\u91CD\u8BD5\u7981\u7528\u65E7${typeName}\u5B50\u5546\u6237\u53F7`);
+        try {
+          if (context.type === "wechat") {
+            const result = await disableOldEnabledWechatMappings(context.merchantId, context.newSubMchId, {
+              ...context.reportOptions,
+              onGroup: (group) => {
+                const paramsText = Object.entries(group.statusParams).map(([key, value]) => `${key}=${value}`).join("&");
+                appendLog(`\u91CD\u8BD5\u7981\u7528\u65E7\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7 ${group.wxSubMchId}: ${paramsText}`);
+              }
+            });
+            appendLog(`\u7981\u7528\u65E7\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7\u91CD\u8BD5\u6210\u529F\uFF0C\u5904\u7406 ${result.changedGroups.length} \u4E2A\u5206\u7EC4`);
+          } else {
+            const result = await disableOldEnabledAlipayMappings(context.merchantId, context.newSubMchId, {
+              ...context.reportOptions,
+              onGroup: (group) => {
+                const paramsText = Object.entries(group.statusParams).map(([key, value]) => `${key}=${value}`).join("&");
+                appendLog(`\u91CD\u8BD5\u7981\u7528\u65E7\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7 ${group.zfbSubMchId || group.subMchId}: ${paramsText}`);
+              }
+            });
+            appendLog(`\u7981\u7528\u65E7\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7\u91CD\u8BD5\u6210\u529F\uFF0C\u5904\u7406 ${result.changedGroups.length} \u4E2A\u5206\u7EC4`);
+          }
+          setProgressStep(context.type, "disable", "success");
+        } catch (error) {
+          setProgressStep(context.type, "disable", "error");
+          throw new Error(`\u7981\u7528\u65E7${typeName}\u5B50\u5546\u6237\u53F7\u91CD\u8BD5\u5931\u8D25: ${error.message}`);
+        }
+      };
+      const retryEnableAndContinue = async (context) => {
+        const typeName = getTypeName(context.type);
+        setProgressStep(context.type, "enable", "running");
+        appendLog(`\u5F00\u59CB\u91CD\u8BD5\u542F\u7528${typeName}\u5B50\u5546\u6237\u53F7 ${context.newSubMchId}`);
+        try {
+          if (context.type === "wechat") {
+            if (context.useSytReport) {
+              await confirmNewWechatMappings(context.merchantId, context.newSubMchId, context.reportOptions);
+              appendLog("\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7\u542F\u7528\u72B6\u6001\u786E\u8BA4\u91CD\u8BD5\u6210\u529F");
+            } else {
+              const currentRows = await queryWechatMappings(context.merchantId, {
+                ...context.reportOptions,
+                wxSubMchId: context.newSubMchId,
+                ...getDateRange({ days: 1 })
+              });
+              const currentUnnotifiedRows = pickRowsByStatus(currentRows, STATUS.UNNOTIFIED);
+              const currentEnabledRows = pickRowsByStatus(currentRows, STATUS.ENABLED);
+              if (currentUnnotifiedRows.length === 0 && currentEnabledRows.length > 0) {
+                appendLog("\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7\u5F53\u524D\u5DF2\u5904\u4E8E\u542F\u7528\u72B6\u6001\uFF0C\u65E0\u9700\u518D\u6B21\u8C03\u7528\u542F\u7528\u63A5\u53E3");
+              } else {
+                const result = await enableNewWechatMappings(context.merchantId, context.newSubMchId, {
+                  ...context.reportOptions,
+                  onGroup: (group) => {
+                    const paramsText = Object.entries(group.statusParams).map(([key, value]) => `${key}=${value}`).join("&");
+                    appendLog(`\u91CD\u8BD5\u542F\u7528\u65B0\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7 ${group.wxSubMchId}: ${paramsText}`);
+                  }
+                });
+                appendLog(`\u542F\u7528\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7\u91CD\u8BD5\u6210\u529F\uFF0C\u5904\u7406 ${result.changedGroups.length} \u4E2A\u5206\u7EC4`);
+              }
+            }
+          } else {
+            await confirmNewAlipayMappings(context.merchantId, context.newSubMchId, context.reportOptions);
+            appendLog("\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7\u542F\u7528\u72B6\u6001\u786E\u8BA4\u91CD\u8BD5\u6210\u529F");
+          }
+          setProgressStep(context.type, "enable", "success");
+        } catch (error) {
+          setProgressStep(context.type, "enable", "error");
+          throw new Error(`\u542F\u7528${typeName}\u5B50\u5546\u6237\u53F7\u91CD\u8BD5\u5931\u8D25: ${error.message}`);
+        }
+        appendLog(`\u7EE7\u7EED\u67E5\u8BE2\u5E76\u7981\u7528\u65E7${typeName}\u5B50\u5546\u6237\u53F7`);
+        await retryDisableOldMappings(context);
+        appendLog("\u91CD\u8BD5\u6D41\u7A0B\u5DF2\u5B8C\u6210\uFF0C\u672C\u6B21\u672A\u6267\u884C appid / \u652F\u4ED8\u6388\u6743\u76EE\u5F55\u7ED1\u5B9A");
+      };
+      const retryProgressStep = async (type, step) => {
+        const context = retryContexts[type];
+        if (!context || !canRetryProgressStep(type, step)) return;
+        const typeName = getTypeName(type);
+        const message = step === "enable" ? `\u786E\u8BA4\u91CD\u8BD5\u542F\u7528${typeName}\u5B50\u5546\u6237\u53F7\u5E76\u7EE7\u7EED\u7981\u7528\u65E7\u53F7\uFF1F` : `\u786E\u8BA4\u91CD\u8BD5\u7981\u7528\u65E7${typeName}\u5B50\u5546\u6237\u53F7\uFF1F`;
+        if (!window.confirm(message)) return;
+        setBusy(true);
+        try {
+          if (step === "enable") {
+            await retryEnableAndContinue(context);
+          } else {
+            await retryDisableOldMappings(context);
+          }
+        } catch (error) {
+          appendLog(error.message, true);
+          console.error(error);
+        } finally {
+          setBusy(false);
+        }
+      };
+      wechatButton.addEventListener("click", async () => {
+        setBusy(true);
+        logBox.innerHTML = "";
+        resetTaskState();
+        try {
+          const merchantId = input.value.trim();
+          const reportOptions = getReportOptions();
+          const result = await autoReport(merchantId, buildFlowOptions("wechat", merchantId, reportOptions));
+          console.log("omAutoReport result:", result);
+        } catch (error) {
+          if (!wechatProgress.querySelector(".progress-step.error")) markFirstPendingProgressError("wechat");
+          appendLog(`\u5931\u8D25: ${error.message}`, true);
+          console.error(error);
+        } finally {
+          setBusy(false);
+        }
+      });
+      alipayButton.addEventListener("click", async () => {
+        setBusy(true);
+        logBox.innerHTML = "";
+        resetTaskState();
+        try {
+          const merchantId = input.value.trim();
+          const reportOptions = getReportOptions();
+          const result = await alipayAutoReport(merchantId, buildFlowOptions("alipay", merchantId, reportOptions));
+          console.log("omAutoReport alipay result:", result);
+        } catch (error) {
+          if (!alipayProgress.querySelector(".progress-step.error")) markFirstPendingProgressError("alipay");
+          appendLog(`\u5931\u8D25: ${error.message}`, true);
+          console.error(error);
+        } finally {
+          setBusy(false);
+        }
+      });
+      allButton.addEventListener("click", async () => {
+        setBusy(true);
+        logBox.innerHTML = "";
+        resetTaskState();
+        try {
+          const merchantId = input.value.trim();
+          const reportOptions = getReportOptions();
+          const runFlow = async (type, runner) => {
+            try {
+              return await runner(merchantId, buildFlowOptions(type, merchantId, reportOptions));
+            } catch (error) {
+              const progress = getProgressContainer(type);
+              if (!progress.querySelector(".progress-step.error")) markFirstPendingProgressError(type);
+              appendLog(`${getTypeName(type)}\u91CD\u7F6E\u5931\u8D25: ${error.message}`, true);
+              throw error;
+            }
+          };
+          const results = await Promise.allSettled([
+            runFlow("wechat", wechatAutoReport),
+            runFlow("alipay", alipayAutoReport)
+          ]);
+          console.log("omAutoReport all result:", results);
+        } finally {
+          setBusy(false);
+        }
+      });
+      clearButton.addEventListener("click", () => {
+        logBox.innerHTML = "";
+      });
+      merchantClearButton.addEventListener("click", () => {
+        input.value = "";
+        logBox.innerHTML = "";
+        resetTaskState();
+        input.focus();
+      });
+      copyButton.addEventListener("click", async () => {
+        const text = getCopyText();
+        if (!text) return;
+        try {
+          await copyText2(text);
+          appendLog("\u5DF2\u590D\u5236\u65B0\u4E0A\u62A5\u5B50\u5546\u6237\u53F7");
+        } catch (error) {
+          appendLog(`\u590D\u5236\u5931\u8D25: ${error.message}`, true);
+        }
+      });
+      floatBall.addEventListener("click", () => {
+        panel.classList.remove("collapsed");
+        input.focus();
+      });
+      closeButton.addEventListener("click", () => {
+        panel.classList.add("collapsed");
+      });
+      presetSelect.addEventListener("change", () => {
+        if (presetSelect.value === "none") {
+          clearOptionalInputs();
+          setOptionalContentOpen(false);
+          appendLog("\u5DF2\u9009\u62E9\u9884\u8BBE\u914D\u7F6E: \u65E0");
+          return;
+        }
+        setOptionalContentOpen(true);
+        if (presetSelect.value === "custom") {
+          appendLog("\u5DF2\u9009\u62E9\u9884\u8BBE\u914D\u7F6E: \u81EA\u5B9A\u4E49");
+          return;
+        }
+        const presetIndex = Number(presetSelect.value.replace("preset-", ""));
+        const preset = WECHAT_PAYMENT_PRESETS[presetIndex];
+        if (preset) applyWechatPaymentPreset(preset);
+      });
+      logToggleButton.addEventListener("click", () => {
+        setLogSectionOpen(!logSection.classList.contains("open"));
+      });
+      wechatProgress.addEventListener("click", (event) => {
+        const stepElement = event.target.closest(".progress-step.retryable");
+        if (stepElement) retryProgressStep("wechat", stepElement.dataset.step);
+      });
+      alipayProgress.addEventListener("click", (event) => {
+        const stepElement = event.target.closest(".progress-step.retryable");
+        if (stepElement) retryProgressStep("alipay", stepElement.dataset.step);
+      });
+      document.addEventListener("click", (event) => {
+        if (!panel.classList.contains("collapsed") && !panel.contains(event.target)) {
+          panel.classList.add("collapsed");
+        }
+      });
+    }
+    function shouldCreatePanel() {
+      const url = new URL(window.location.href);
+      const method = url.searchParams.get("method") || "";
+      const blockedMethods = /* @__PURE__ */ new Set([
+        "getSetTradeStatusPage",
+        "setTradeStatus",
+        "getSetTradeDefaultPage",
+        "setTradeDefault"
+      ]);
+      if (blockedMethods.has(method)) return false;
+      if (window.top === window.self) return true;
+      return method === "page";
+    }
+    const api = {
+      wechatAutoReport,
+      alipayAutoReport,
+      allAutoReport,
+      submitWechatReport,
+      submitAlipayReport,
+      submitSytWechatReport,
+      submitSytAlipayReport,
+      bindWechatPaymentConfig,
+      bindLatestWechatPaymentConfig,
+      reportMerchant,
+      queryWechatMappings,
+      queryAlipayMappings,
+      queryWxSubmchConfigRows,
+      parseMappingHtml,
+      pollWechatNewMappings,
+      pollWechatEnabledMappings,
+      pollAlipayNewMappings,
+      enableNewWechatMappings,
+      confirmNewWechatMappings,
+      confirmNewAlipayMappings,
+      disableOldEnabledWechatMappings,
+      disableOldEnabledAlipayMappings,
+      groupRowsForTradeStatus,
+      setWechatTradeStatus,
+      setAlipayTradeStatus,
+      setWechatStatusGroups,
+      setAlipayStatusGroups,
+      setTradeStatus,
+      parseStatusResultHtml,
+      autoReport,
+      getDateRange,
+      getDefaultRange
+    };
+    window.lhsdAutoReport = api;
+    window.omAutoReport = api;
+    if (typeof unsafeWindow !== "undefined") {
+      unsafeWindow.lhsdAutoReport = api;
+      unsafeWindow.omAutoReport = api;
+    }
+    if (shouldCreatePanel()) {
+      createPanel2();
+    }
+  })();
+
   // src/content/index.ts
-  var VERSION = "1.0.0";
+  var VERSION = "1.0.2";
   var FLOAT_TOP_STORAGE_KEY = "syt-extension-float-top";
   var FLOAT_SIZE = 54;
   var FLOAT_VIEWPORT_GAP = 8;
@@ -3523,23 +5384,28 @@
       return [`\u4E50\u5237\u5546\u6237\u53F7${result.merchantId}`, channels.join(" ")].join("\n");
     }).join("\n");
   }
+  function businessLineName(businessLine) {
+    return businessLine === "lhsd" ? "\u8054\u5408\u6536\u5355" : "\u6536\u94F6\u901A";
+  }
   function createPanel(api) {
     document.getElementById("syt-auto-report-panel")?.remove();
+    document.getElementById("lhsd-auto-report-panel")?.remove();
     document.getElementById("syt-extension-root")?.remove();
     const root = document.createElement("div");
     root.id = "syt-extension-root";
     root.className = "collapsed";
     root.innerHTML = `
-    <button id="syt-extension-float" class="float-ball" type="button" title="\u6253\u5F00\u6536\u94F6\u901A\u8FD0\u8425\u5DE5\u5177">\u6536\u94F6\u901A</button>
-    <section class="panel" aria-label="\u6536\u94F6\u901A\u8FD0\u8425\u5DE5\u5177">
-      <header><div><button id="syt-back" class="icon-button" type="button" title="\u8FD4\u56DE">\u2190</button><span id="syt-title">\u6536\u94F6\u901A\u8FD0\u8425\u5DE5\u5177 v${VERSION}</span></div><button id="syt-close" class="icon-button" type="button" title="\u6536\u8D77">\xD7</button></header>
+    <button id="syt-extension-float" class="float-ball" type="button" title="\u6253\u5F00\u8FD0\u8425\u5DE5\u5177">\u8FD0\u8425\u5DE5\u5177</button>
+    <section class="panel" aria-label="\u8FD0\u8425\u5DE5\u5177">
+      <header><div><button id="syt-back" class="icon-button" type="button" title="\u8FD4\u56DE">\u2190</button><span id="syt-title">\u8FD0\u8425\u5DE5\u5177 v${VERSION}</span></div><button id="syt-close" class="icon-button" type="button" title="\u6536\u8D77">\xD7</button></header>
       <main>
         <section id="syt-view-reset" class="view active">
           <label>\u4E50\u5237\u5546\u6237\u53F7<input id="syt-merchant-ids" placeholder="\u6700\u591A 5 \u4E2A\uFF0C\u4EE5 ; \u5206\u9694" autocomplete="off"></label>
+          <fieldset class="business-line"><legend>\u91CD\u7F6E\u4E1A\u52A1\u7EBF</legend><label><input type="radio" name="syt-business-line" value="syt" checked>\u6536\u94F6\u901A</label><label><input type="radio" name="syt-business-line" value="lhsd">\u8054\u5408\u6536\u5355</label></fieldset>
           <div class="form-row"><label>\u91CD\u7F6E\u901A\u9053<select id="syt-report-type"><option value="ALL">\u5168\u90E8\u91CD\u7F6E</option><option value="WECHAT">\u5FAE\u4FE1\u91CD\u7F6E</option><option value="ALIPAY">\u652F\u4ED8\u5B9D\u91CD\u7F6E</option></select></label><label>\u4E0A\u62A5\u9884\u8BBE<select id="syt-preset">${PRESETS.map((preset2, index) => `<option value="${index}">${preset2.name}</option>`).join("")}</select></label></div>
           <div id="syt-channel-options" class="optional-options"><div class="section-title">\u53EF\u9009\u4E0A\u62A5\u6E20\u9053</div><div class="form-row"><label>\u5FAE\u4FE1\u6E20\u9053\u53F7<input id="syt-wx-channel-id" autocomplete="off"></label><label>\u5FAE\u4FE1\u6E20\u9053\u4E3B\u4F53<input id="syt-wx-channel-name" autocomplete="off"></label></div><div class="form-row"><label>\u652F\u4ED8\u5B9D\u6E20\u9053\u53F7<input id="syt-alipay-channel-id" autocomplete="off"></label><label>\u652F\u4ED8\u5B9D\u6E20\u9053\u4E3B\u4F53<input id="syt-alipay-channel-name" autocomplete="off"></label></div></div>
           <div class="section-title">\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\uFF08\u53EF\u9009\uFF09</div><label>appid<input id="syt-appid" autocomplete="off"></label><label>\u652F\u4ED8\u6388\u6743\u76EE\u5F55<input id="syt-jsapi-paths" autocomplete="off"></label>
-          <button id="syt-run-reset" class="primary" type="button">\u6267\u884C\u91CD\u7F6E</button>
+          <div class="reset-actions"><button id="syt-run-reset" class="primary" type="button">\u6267\u884C\u91CD\u7F6E</button><button id="syt-run-payment-config" type="button">\u914D\u7F6E\u7ED1\u5B9A</button></div>
           <div class="shared-tool-actions"><button id="syt-run-key" type="button">\u914D\u7F6E\u5546\u6237 key</button><button id="syt-run-receipt" type="button">\u5F00\u901A\u5728\u7EBF\u6536\u6B3E\u5355</button></div>
           <div id="syt-reset-status" class="status"></div>
           <div class="section-title">\u672C\u6B21\u91CD\u7F6E\u7ED3\u679C</div><div class="result-table-wrap"><table><thead><tr><th>\u4E50\u5237\u5546\u6237\u53F7</th><th>\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7</th><th>\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7</th><th>\u65B9\u5F0F</th></tr></thead><tbody id="syt-results"><tr><td colspan="4" class="empty">\u6267\u884C\u540E\u663E\u793A\u7ED3\u679C</td></tr></tbody></table></div>
@@ -3557,6 +5423,7 @@
     const backButton = byId(root, "syt-back");
     const title = byId(root, "syt-title");
     const resetInput = byId(root, "syt-merchant-ids");
+    const businessLineInputs = Array.from(root.querySelectorAll('input[name="syt-business-line"]'));
     const reportType = byId(root, "syt-report-type");
     const preset = byId(root, "syt-preset");
     const channelOptions = byId(root, "syt-channel-options");
@@ -3567,6 +5434,7 @@
     const appids = byId(root, "syt-appid");
     const jsapiPaths = byId(root, "syt-jsapi-paths");
     const runReset = byId(root, "syt-run-reset");
+    const runPaymentConfig = byId(root, "syt-run-payment-config");
     const runKey = byId(root, "syt-run-key");
     const runReceipt = byId(root, "syt-run-receipt");
     const resetStatus = byId(root, "syt-reset-status");
@@ -3607,6 +5475,7 @@
     const setBusy = (next) => {
       busy = next;
       runReset.disabled = next;
+      runPaymentConfig.disabled = next;
       runKey.disabled = next;
       runReceipt.disabled = next;
       runReset.textContent = next ? "\u5904\u7406\u4E2D..." : "\u6267\u884C\u91CD\u7F6E";
@@ -3621,6 +5490,7 @@
       disableOldSubMch: true,
       onLog: (message, context) => log(message, context === true)
     });
+    const selectedBusinessLine = () => businessLineInputs.find((input) => input.checked)?.value === "lhsd" ? "lhsd" : "syt";
     const renderResults = (results) => {
       latestResults = results;
       resultBody.replaceChildren();
@@ -3639,7 +5509,9 @@
       }
       results.forEach((result) => {
         const row = document.createElement("tr");
-        [result.merchantId, channelText(result.wechat), channelText(result.alipay), result.route === "batch" ? "\u6279\u91CF\u63A5\u53E3" : "\u81EA\u5B9A\u4E49\u6E20\u9053"].forEach((value) => {
+        const lineName = businessLineName(result.businessLine || "syt");
+        const routeText = result.route === "batch" ? `${lineName}\u6279\u91CF` : `${lineName}\u81EA\u5B9A\u4E49\u6E20\u9053`;
+        [result.merchantId, channelText(result.wechat), channelText(result.alipay), routeText].forEach((value) => {
           const cell = document.createElement("td");
           cell.textContent = value;
           if (value.startsWith("\u5931\u8D25")) cell.className = "error";
@@ -3667,7 +5539,7 @@
     const showView = (name) => {
       root.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === `syt-view-${name}`));
       backButton.classList.toggle("visible", name !== "reset");
-      title.textContent = `${name === "reset" ? "\u6536\u94F6\u901A\u8FD0\u8425\u5DE5\u5177" : { code: "\u7801\u724C\u5212\u8F6C", device: "\u673A\u5177\u5212\u62E8", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name]} v${VERSION}`;
+      title.textContent = `${name === "reset" ? "\u8FD0\u8425\u5DE5\u5177" : { code: "\u7801\u724C\u5212\u8F6C", device: "\u673A\u5177\u5212\u62E8", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name]} v${VERSION}`;
     };
     const applyPreset = () => {
       const option = PRESETS[Number(preset.value)] || PRESETS[0];
@@ -3743,6 +5615,8 @@
       try {
         const merchantIds = parseMerchantIds(resetInput.value);
         const type = reportType.value;
+        const businessLine = selectedBusinessLine();
+        const reportMode = businessLine === "lhsd" ? "COMMON" : "SYT";
         const options = reportOptions();
         validateChannels(options);
         if (type === "ALIPAY" && (options.subAppids || options.jsapiPaths)) {
@@ -3751,9 +5625,10 @@
         setBusy(true);
         renderResults([]);
         const useLegacy = hasCustomChannel(options);
-        setStatus(resetStatus, useLegacy ? "\u4F7F\u7528\u81EA\u5B9A\u4E49\u6E20\u9053\u65E7\u6D41\u7A0B\u5904\u7406\u4E2D" : "\u6B63\u5728\u8C03\u7528\u6279\u91CF\u91CD\u7F6E\u63A5\u53E3");
-        log(`\u5F00\u59CB${useLegacy ? "\u81EA\u5B9A\u4E49\u6E20\u9053" : "\u6279\u91CF"}\u91CD\u7F6E: ${merchantIds.join("\uFF1B")}`);
-        const results = useLegacy ? await runLegacyReset(api, merchantIds, type, options, log, renderResults) : await runBatchReset(api, merchantIds, type, options, log);
+        setStatus(resetStatus, useLegacy ? `\u4F7F\u7528${businessLineName(businessLine)}\u81EA\u5B9A\u4E49\u6E20\u9053\u65E7\u6D41\u7A0B\u5904\u7406\u4E2D` : `\u6B63\u5728\u8C03\u7528${businessLineName(businessLine)}\u6279\u91CF\u91CD\u7F6E\u63A5\u53E3`);
+        log(`\u5F00\u59CB${businessLineName(businessLine)}${useLegacy ? "\u81EA\u5B9A\u4E49\u6E20\u9053" : "\u6279\u91CF"}\u91CD\u7F6E: ${merchantIds.join("\uFF1B")}`);
+        const resetApi = businessLine === "lhsd" ? getLegacyApi("lhsd") : api;
+        const results = useLegacy ? await runLegacyReset(resetApi, merchantIds, type, options, log, renderResults, businessLine) : await runBatchReset(resetApi, merchantIds, type, options, log, reportMode);
         renderResults(results);
         await copyCurrentResults(true);
         const failed = results.filter((item) => item.wechat.state === "failure" || item.alipay.state === "failure" || item.wechat.error || item.alipay.error).length;
@@ -3763,6 +5638,36 @@
         const message = error instanceof Error ? error.message : String(error);
         setStatus(resetStatus, message, true);
         log(`\u91CD\u7F6E\u5931\u8D25: ${message}`, true);
+      } finally {
+        setBusy(false);
+      }
+    });
+    runPaymentConfig.addEventListener("click", async () => {
+      if (busy) return;
+      try {
+        const merchantIds = parseMerchantIds(resetInput.value);
+        if (merchantIds.length !== 1) throw new Error("\u914D\u7F6E\u7ED1\u5B9A\u4E00\u6B21\u53EA\u80FD\u5904\u7406\u4E00\u4E2A\u4E50\u5237\u5546\u6237\u53F7");
+        const options = reportOptions();
+        if (!options.subAppids && !options.jsapiPaths) {
+          throw new Error("\u8BF7\u81F3\u5C11\u586B\u5199 appid \u6216\u652F\u4ED8\u6388\u6743\u76EE\u5F55");
+        }
+        const bindingApi = getLegacyApi(selectedBusinessLine());
+        setBusy(true);
+        setStatus(resetStatus, "\u6B63\u5728\u67E5\u8BE2\u6700\u65B0\u5FAE\u4FE1\u6620\u5C04\u8BB0\u5F55\u5E76\u914D\u7F6E\u7ED1\u5B9A...");
+        log(`\u5F00\u59CB\u4E3A\u5546\u6237 ${merchantIds[0]} \u914D\u7F6E\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570`);
+        const result = await bindingApi.bindLatestWechatPaymentConfig(merchantIds[0], {
+          ...options,
+          onConfigRow: (row) => {
+            log(`\u67E5\u8BE2\u5230\u6700\u65B0\u5FAE\u4FE1\u6620\u5C04\u8BB0\u5F55\uFF1A\u5B50\u5546\u6237\u53F7 ${row.fWxSubMchId || "-"}\uFF0Cid ${row.fId || "-"}`);
+          }
+        });
+        const id = result.id || "-";
+        setStatus(resetStatus, "\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\u7ED1\u5B9A\u5B8C\u6210");
+        log(`\u5546\u6237 ${merchantIds[0]} \u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\u7ED1\u5B9A\u5B8C\u6210\uFF0C\u914D\u7F6E\u8BB0\u5F55 id: ${id}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setStatus(resetStatus, message, true);
+        log(`\u914D\u7F6E\u7ED1\u5B9A\u5931\u8D25: ${message}`, true);
       } finally {
         setBusy(false);
       }
@@ -3919,10 +5824,15 @@
     });
     applyPreset();
   }
+  function getLegacyApi(businessLine) {
+    const apiName = businessLine === "lhsd" ? "lhsdAutoReport" : "sytAutoReport";
+    const api = window[apiName];
+    if (!api) throw new Error(`\u672A\u52A0\u8F7D${businessLineName(businessLine)}\u91CD\u7F6E\u529F\u80FD`);
+    return api;
+  }
   function bootstrap() {
     if (window.top !== window.self) return;
-    const api = window.sytAutoReport;
-    if (!api) return;
+    const api = getLegacyApi("syt");
     createPanel(api);
   }
   bootstrap();

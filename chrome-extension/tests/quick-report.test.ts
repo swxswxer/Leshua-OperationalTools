@@ -37,4 +37,17 @@ describe('parseQuickReportResponse', () => {
     expect(results[0].alipay).toMatchObject({ state: 'failure', error: 'merchantId不存在' });
     expect(results[0].wechat.state).toBe('skipped');
   });
+
+  it('parses the 联合收单 string child-merchant response', () => {
+    const results = parseQuickReportResponse({
+      code: 1,
+      success: true,
+      data: { respCode: '0', data: [{ merchantId: '1234567890', results: [
+        { channel: '微信', respCode: '0', respMsg: '上报成功', data: '918920026' },
+        { channel: '支付宝', respCode: '0', respMsg: '上报成功', data: '2088880607964435' },
+      ] }] },
+    }, ['1234567890'], 'ALL');
+    expect(results[0].wechat).toMatchObject({ state: 'success', subMchId: '918920026' });
+    expect(results[0].alipay).toMatchObject({ state: 'success', subMchId: '2088880607964435' });
+  });
 });

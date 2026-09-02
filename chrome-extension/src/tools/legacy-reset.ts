@@ -46,12 +46,14 @@ export async function runLegacyReset(
   options: ReportOptions,
   log: LogHandler,
   onResultUpdate: ResultUpdateHandler,
+  businessLine: 'syt' | 'lhsd' = 'syt',
 ): Promise<MerchantReportResult[]> {
   const output: MerchantReportResult[] = [];
   for (const merchantId of merchantIds) {
     const result: MerchantReportResult = {
       merchantId,
       route: 'legacy',
+      businessLine,
       wechat: isRequested(reportType, 'wechat') ? pendingChannel() : skippedChannel(),
       alipay: isRequested(reportType, 'alipay') ? pendingChannel() : skippedChannel(),
     };

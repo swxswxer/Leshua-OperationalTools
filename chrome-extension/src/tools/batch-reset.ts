@@ -1,6 +1,6 @@
 import type { LegacyApi, LogHandler, ReportOptions } from '../content/contracts';
 import { isRequested } from '../content/helpers';
-import { type MerchantReportResult, type ReportType, submitQuickReport } from '../content/quick-report';
+import { type MerchantReportResult, type ReportMode, type ReportType, submitQuickReport } from '../content/quick-report';
 
 async function bindWechatPaymentConfigs(
   api: LegacyApi,
@@ -30,8 +30,10 @@ export async function runBatchReset(
   reportType: ReportType,
   options: ReportOptions,
   log: LogHandler,
+  reportMode: ReportMode = 'SYT',
 ): Promise<MerchantReportResult[]> {
-  const results = await submitQuickReport(merchantIds, reportType);
+  const results = await submitQuickReport(merchantIds, reportType, reportMode);
+  results.forEach((result) => { result.businessLine = reportMode === 'COMMON' ? 'lhsd' : 'syt'; });
   if (isRequested(reportType, 'wechat')) {
     await bindWechatPaymentConfigs(api, results, options, log);
   }

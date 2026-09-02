@@ -15,10 +15,17 @@
 #syt-extension-root button { min-height: 31px; padding: 4px 10px; color: #1d4ed8; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 0; cursor: pointer; font: inherit; }
 #syt-extension-root button:disabled { color: #6b7280; background: #f3f4f6; border-color: #d1d5db; cursor: not-allowed; }
 #syt-extension-root .primary { width: 100%; margin: 10px 0 0; color: #fff; background: #1f6feb; border-color: #1d4ed8; font-weight: 700; }
+#syt-extension-root .reset-actions { display: grid; grid-template-columns: 4fr 1fr; gap: 8px; margin-top: 10px; }
+#syt-extension-root .reset-actions .primary { margin: 0; }
+#syt-extension-root .reset-actions button:not(.primary) { margin: 0; white-space: nowrap; }
 #syt-extension-root .icon-button { width: 26px; min-height: 26px; padding: 0; color: #fff; background: transparent; border-color: rgba(255,255,255,.55); }
 #syt-extension-root #syt-back { display: none; }
 #syt-extension-root #syt-back.visible { display: inline-block; }
 #syt-extension-root .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#syt-extension-root .business-line { display: flex; gap: 16px; margin: 10px 0; padding: 7px 8px; border: 1px solid #cbd5e1; }
+#syt-extension-root .business-line legend { padding: 0 4px; color: #374151; font-weight: 700; }
+#syt-extension-root .business-line label { display: inline-flex; align-items: center; gap: 5px; margin: 0; font-weight: 400; cursor: pointer; }
+#syt-extension-root .business-line input { width: auto; height: auto; margin: 0; padding: 0; }
 #syt-extension-root .section-title { margin-top: 12px; color: #374151; font-weight: 700; }
 #syt-extension-root .optional-options { margin-top: 8px; }
 #syt-extension-root .optional-options.hidden { display: none; }

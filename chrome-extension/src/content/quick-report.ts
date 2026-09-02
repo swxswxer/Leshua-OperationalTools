@@ -1,5 +1,6 @@
 export type ReportType = 'WECHAT' | 'ALIPAY' | 'ALL';
 export type ChannelName = 'wechat' | 'alipay';
+export type ReportMode = 'SYT' | 'COMMON';
 
 export interface ChannelResult {
   state: 'pending' | 'success' | 'failure' | 'skipped';
@@ -11,6 +12,7 @@ export interface ChannelResult {
 export interface MerchantReportResult {
   merchantId: string;
   route: 'batch' | 'legacy';
+  businessLine?: 'syt' | 'lhsd';
   wechat: ChannelResult;
   alipay: ChannelResult;
 }
@@ -19,7 +21,7 @@ interface QuickReportChannelResponse {
   channel?: string;
   respCode?: string | number;
   respMsg?: string | null;
-  data?: {
+  data?: string | number | {
     result?: number | string;
     msg?: string | null;
     wxMchId?: string | number;
@@ -68,9 +70,13 @@ function failure(error: string): ChannelResult {
 function readChannelResult(channel: ChannelName, response: QuickReportChannelResponse | undefined): ChannelResult {
   if (!response) return failure(`接口未返回${channel === 'wechat' ? '微信' : '支付宝'}处理结果`);
   const data = response.data;
-  const success = String(response.respCode) === '0' && Number(data?.result) === 0;
-  const id = channel === 'wechat' ? data?.wxMchId : data?.zfbSubMch;
-  if (!success) return failure(String(response.respMsg || data?.msg || '上报失败'));
+  const structuredData = typeof data === 'object' && data !== null ? data : null;
+  const success = String(response.respCode) === '0'
+    && (structuredData ? Number(structuredData.result) === 0 : Boolean(data));
+  const id = structuredData
+    ? channel === 'wechat' ? structuredData.wxMchId : structuredData.zfbSubMch
+    : data;
+  if (!success) return failure(String(response.respMsg || structuredData?.msg || '上报失败'));
   if (!id || !/^\d+$/.test(String(id))) return failure('上报成功但未返回子商户号');
   return { state: 'success', subMchId: String(id) };
 }
@@ -113,12 +119,13 @@ export function parseQuickReportResponse(payload: unknown, merchantIds: string[]
 export async function submitQuickReport(
   merchantIds: string[],
   reportType: ReportType,
+  reportMode: ReportMode = 'SYT',
   fetchImpl: typeof fetch = fetch,
 ): Promise<MerchantReportResult[]> {
   const body = new URLSearchParams({
     merchantIds: merchantIds.join(';'),
     reportType,
-    reportMode: 'SYT',
+    reportMode,
   });
   const response = await fetchImpl('/lspos/atBatchTask.do?method=quickManualReport', {
     method: 'POST',
