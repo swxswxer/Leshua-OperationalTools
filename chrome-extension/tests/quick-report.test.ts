@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseMerchantIds, parseQuickReportResponse } from '../src/content/quick-report';
+import { parseMerchantIds, parseQuickReportResponse } from '../src/api/quick-report';
 
 describe('parseMerchantIds', () => {
   it('keeps the semicolon input order and removes empty entries', () => {

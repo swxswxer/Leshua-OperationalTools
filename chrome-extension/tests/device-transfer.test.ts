@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { queryOldDeviceAgent, validateDeviceTransfer } from '../src/tools/device-transfer';
+import { queryOldDeviceAgent, validateDeviceTransfer } from '../src/api/device-transfer';
 
 describe('device transfer', () => {
   it('reads old-agent details from the SN lookup response', async () => {

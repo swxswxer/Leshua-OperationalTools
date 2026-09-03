@@ -1,5 +1,5 @@
-import type { ChannelResult, ReportType } from './quick-report';
-import type { ReportOptions } from './contracts';
+import type { ChannelResult } from '../api/quick-report';
+import type { ReportOptions } from '../types';
 
 export function channelText(result: ChannelResult): string {
   if (result.state === 'success') return `${result.subMchId}${result.note ? `（${result.note}）` : ''}`;
@@ -21,21 +21,13 @@ export function hasCustomChannel(options: ReportOptions): boolean {
   return Boolean(options.channelId || options.channelName || options.sourcePid || options.sourceName);
 }
 
-export function isRequested(type: ReportType, channel: 'wechat' | 'alipay'): boolean {
-  return type === 'ALL' || (type === 'WECHAT' && channel === 'wechat') || (type === 'ALIPAY' && channel === 'alipay');
-}
-
-export function skippedChannel(): ChannelResult {
-  return { state: 'skipped' };
-}
-
 export async function copyText(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
     try {
       await navigator.clipboard.writeText(text);
       return;
     } catch {
-      // Some browsers reject asynchronous clipboard writes; use the legacy fallback below.
+      // Some browsers reject asynchronous clipboard writes; use the textarea fallback below.
     }
   }
   const textarea = document.createElement('textarea');

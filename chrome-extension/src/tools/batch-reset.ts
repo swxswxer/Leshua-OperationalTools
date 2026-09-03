@@ -1,9 +1,10 @@
-import type { LegacyApi, LogHandler, ReportOptions } from '../content/contracts';
-import { isRequested } from '../content/helpers';
-import { type MerchantReportResult, type ReportMode, type ReportType, submitQuickReport } from '../content/quick-report';
+import type { LogHandler, ReportOptions } from '../types';
+import {
+  isRequested, type MerchantReportResult, type ReportMode, type ReportType, submitQuickReport,
+} from '../api/quick-report';
+import { bindWechatPaymentConfig } from '../api/payment-config';
 
 async function bindWechatPaymentConfigs(
-  api: LegacyApi,
   results: MerchantReportResult[],
   options: ReportOptions,
   log: LogHandler,
@@ -13,7 +14,7 @@ async function bindWechatPaymentConfigs(
     if (result.wechat.state !== 'success' || !result.wechat.subMchId) continue;
     try {
       log(`开始绑定商户 ${result.merchantId} 的微信支付参数`);
-      await api.bindWechatPaymentConfig(result.merchantId, result.wechat.subMchId, options);
+      await bindWechatPaymentConfig(result.merchantId, result.wechat.subMchId, options);
       log(`商户 ${result.merchantId} 微信支付参数绑定完成`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -25,7 +26,6 @@ async function bindWechatPaymentConfigs(
 
 /** Executes the new backend batch endpoint and its optional WeChat payment setup. */
 export async function runBatchReset(
-  api: LegacyApi,
   merchantIds: string[],
   reportType: ReportType,
   options: ReportOptions,
@@ -35,7 +35,7 @@ export async function runBatchReset(
   const results = await submitQuickReport(merchantIds, reportType, reportMode);
   results.forEach((result) => { result.businessLine = reportMode === 'COMMON' ? 'lhsd' : 'syt'; });
   if (isRequested(reportType, 'wechat')) {
-    await bindWechatPaymentConfigs(api, results, options, log);
+    await bindWechatPaymentConfigs(results, options, log);
   }
   return results;
 }

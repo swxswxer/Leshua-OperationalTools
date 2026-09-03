@@ -11,7 +11,7 @@ export interface ChannelResult {
 
 export interface MerchantReportResult {
   merchantId: string;
-  route: 'batch' | 'legacy';
+  route: 'batch' | 'custom';
   businessLine?: 'syt' | 'lhsd';
   wechat: ChannelResult;
   alipay: ChannelResult;
@@ -55,11 +55,11 @@ export function parseMerchantIds(raw: string): string[] {
   return merchantIds;
 }
 
-function requested(type: ReportType, channel: ChannelName): boolean {
+export function isRequested(type: ReportType, channel: ChannelName): boolean {
   return type === 'ALL' || (type === 'WECHAT' && channel === 'wechat') || (type === 'ALIPAY' && channel === 'alipay');
 }
 
-function skipped(): ChannelResult {
+export function skippedChannel(): ChannelResult {
   return { state: 'skipped' };
 }
 
@@ -97,16 +97,16 @@ export function parseQuickReportResponse(payload: unknown, merchantIds: string[]
     const row = rows.find((item) => String(item.merchantId) === merchantId);
     const noRowError = globalError || '接口未返回该商户的处理结果';
     const results = row?.results || [];
-    const wechat = requested(reportType, 'wechat')
+    const wechat = isRequested(reportType, 'wechat')
       ? row
         ? readChannelResult('wechat', results.find((item) => isChannel(item, 'wechat')))
         : failure(noRowError)
-      : skipped();
-    const alipay = requested(reportType, 'alipay')
+      : skippedChannel();
+    const alipay = isRequested(reportType, 'alipay')
       ? row
         ? readChannelResult('alipay', results.find((item) => isChannel(item, 'alipay')))
         : failure(noRowError)
-      : skipped();
+      : skippedChannel();
     return {
       merchantId,
       route: 'batch',
