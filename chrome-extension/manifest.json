@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "运营工具",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnrE6uNTy01CiJmLMi/1E6h+rLQTIv9rFXZqFb7EPnIaXIovlxrQ1v33zVuCWzKYx8ZC2EQmHI8wThIxAlW4prC9WlHKUj9EXL0bw4vrZ+CPkzOxnYq2QSPklvig5AntZipUO0tcCZBb/mHrcxws6/o//313u6l0Uwb0fNVey3Jt5jHEI/8PYVjU0S0t7qawMQnjezkrNztvaMpU4bomQN6Nu3oZ7TqjyS+2tKy5eaOuShg//5+1GIGL/p/D5ucjXWjcBfQqopE5+U7+mVGpNUav6C/5Ka8GEObLYqp8RSoHhrSRvVhGtKpnKCfXkJOcPQDCODXURWto6AYlhzBVgbwIDAQAB",
   "description": "运营后台联合收单、收银通子商户号重置及辅助工具。",
   "permissions": [
@@ -10,12 +10,21 @@
   ],
   "content_scripts": [
     {
-      "matches": ["https://om.leshuazf.com/*"],
+      "matches": [
+        "https://om.leshuazf.com/*",
+        "https://h5.leshuazf.com/wap/customer-service/*"
+      ],
       "js": ["content.js"],
       "css": ["content.css"],
       "run_at": "document_end",
       "all_frames": false
     }
   ],
-  "host_permissions": ["https://om.leshuazf.com/*"]
+  "background": {
+    "service_worker": "background.js"
+  },
+  "host_permissions": [
+    "https://om.leshuazf.com/*",
+    "https://h5.leshuazf.com/wap/customer-service/*"
+  ]
 }

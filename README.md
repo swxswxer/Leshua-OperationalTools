@@ -1,6 +1,6 @@
 # 运营工具 Chrome 插件
 
-内部使用的 Manifest V3 Chrome 插件，在 `https://om.leshuazf.com/*` 运营后台内注入悬浮工具。插件沿用浏览器当前登录态，不需要油猴脚本，也不向页面暴露控制台全局对象。
+内部使用的 Manifest V3 Chrome 插件，在运营后台和 `https://h5.leshuazf.com/wap/customer-service/#/Online` 客服页面注入悬浮工具。客服页面中的操作由扩展后台代理到 `https://om.leshuazf.com`，沿用浏览器现有的运营后台登录态，不会把业务请求发送给当前 H5 页面。
 
 ## 安装与构建
 
@@ -30,6 +30,8 @@ npm run build
 
 ```text
 chrome-extension/src/
+├── background/
+│   └── index.ts                 # H5 页面到运营后台的请求代理
 ├── api/
 │   ├── http.ts                  # 通用请求、日期和 HTML 解析
 │   ├── quick-report.ts          # 收银通/联合收单共用批量重置接口

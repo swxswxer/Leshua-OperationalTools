@@ -1,5 +1,165 @@
 "use strict";
 (() => {
+  // src/api/http.ts
+  var ORIGIN = "https://om.leshuazf.com";
+  var SAAS = `${ORIGIN}/saasadmin`;
+  var SYT_OMS = `${ORIGIN}/syt_oms`;
+  var USER_CENTER = `${ORIGIN}/lsuser_center`;
+  function isOperationsBackendPage() {
+    return window.location.origin === ORIGIN;
+  }
+  function assertBackendUrl(url) {
+    const resolved = new URL(url, ORIGIN);
+    if (resolved.origin !== ORIGIN) throw new Error(`\u7981\u6B62\u8BF7\u6C42\u975E\u8FD0\u8425\u540E\u53F0\u5730\u5740: ${resolved.origin}`);
+    return resolved.href;
+  }
+  async function sendBackendRequest(request2) {
+    const message = { type: "operations:backend-request", request: request2 };
+    try {
+      const response = await chrome.runtime.sendMessage(message);
+      if (!response) throw new Error("\u6269\u5C55\u540E\u53F0\u6CA1\u6709\u8FD4\u56DE\u8BF7\u6C42\u7ED3\u679C");
+      if (!response.ok) throw new Error(response.error || `\u8BF7\u6C42\u5931\u8D25 ${response.status}: ${response.text.slice(0, 200)}`);
+      return response;
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      throw new Error(`\u65E0\u6CD5\u8FDE\u63A5\u8FD0\u8425\u540E\u53F0: ${messageText}`);
+    }
+  }
+  function serializeBody(body) {
+    if (body == null) return void 0;
+    if (typeof body === "string") return body;
+    if (body instanceof URLSearchParams) return body.toString();
+    throw new Error("\u5F53\u524D\u8DE8\u57DF\u8BF7\u6C42\u53EA\u652F\u6301\u6587\u672C\u6216\u8868\u5355\u53C2\u6570");
+  }
+  function headersToRecord(headers) {
+    const output = {};
+    new Headers(headers).forEach((value, key) => {
+      output[key] = value;
+    });
+    return output;
+  }
+  function bytesToBase64(bytes) {
+    const chunkSize = 32768;
+    let binary = "";
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+    }
+    return btoa(binary);
+  }
+  function normalizeText(value) {
+    return String(value ?? "").replace(/\s+/g, " ").trim();
+  }
+  function assertMerchantId(merchantId) {
+    if (!/^\d{10}$/.test(merchantId)) throw new Error("\u4E50\u5237\u5546\u6237\u53F7\u4E0D\u80FD\u4E3A\u7A7A\uFF0C\u4E14\u5FC5\u987B\u4E3A 10 \u4F4D\u6570\u5B57");
+  }
+  function buildFormBody(values) {
+    const body = new URLSearchParams();
+    Object.entries(values).forEach(([key, value]) => body.set(key, value == null ? "" : String(value)));
+    return body;
+  }
+  function pad(value) {
+    return String(value).padStart(2, "0");
+  }
+  function formatDateTime(date) {
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  }
+  function getDateRange(options = {}) {
+    const end = /* @__PURE__ */ new Date();
+    const start = new Date(end);
+    if (options.years) start.setFullYear(start.getFullYear() - options.years);
+    else start.setDate(start.getDate() - (options.days ?? 1));
+    return { createStartTime: formatDateTime(start), createEndTime: formatDateTime(end) };
+  }
+  function getHtmlMessage(html) {
+    const document2 = new DOMParser().parseFromString(html, "text/html");
+    return normalizeText(document2.body?.textContent || html);
+  }
+  function summarizeHtml(html) {
+    const document2 = new DOMParser().parseFromString(html, "text/html");
+    const title = normalizeText(document2.querySelector("title")?.textContent);
+    const body = normalizeText(document2.body?.textContent || html);
+    return [title ? `\u6807\u9898: ${title}` : "", body ? `\u6B63\u6587: ${body.slice(0, 260)}` : ""].filter(Boolean).join("\uFF1B") || html.slice(0, 260);
+  }
+  function detectHtmlError(html) {
+    const message = getHtmlMessage(html);
+    if (message.includes("\u6CA1\u6709\u8BE5\u9879\u64CD\u4F5C\u6743\u9650")) return "\u6CA1\u6709\u8BE5\u9879\u64CD\u4F5C\u6743\u9650\uFF0C\u8BF7\u786E\u8BA4\u5F53\u524D\u8D26\u53F7\u5DF2\u5F00\u901A\u8BE5\u540E\u53F0\u64CD\u4F5C\u6743\u9650";
+    if (/登录|login|验证码/.test(message)) return "\u5F53\u524D\u767B\u5F55\u6001\u53EF\u80FD\u5DF2\u5931\u6548\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55\u8FD0\u8425\u540E\u53F0\u540E\u518D\u8BD5";
+    return "";
+  }
+  function looksLikeHtml(text) {
+    return /^\s*<!doctype html/i.test(text) || /^\s*<html[\s>]/i.test(text);
+  }
+  async function requestText(url, options = {}) {
+    const { accept, timeoutMs, headers, ...requestOptions } = options;
+    const resolvedUrl = assertBackendUrl(url);
+    const requestHeaders = {
+      Accept: accept || "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "X-Requested-With": "XMLHttpRequest",
+      ...headersToRecord(headers)
+    };
+    if (!isOperationsBackendPage()) {
+      const response = await sendBackendRequest({
+        kind: "text",
+        url: resolvedUrl,
+        method: requestOptions.method || "GET",
+        headers: requestHeaders,
+        body: serializeBody(requestOptions.body),
+        cache: requestOptions.cache,
+        timeoutMs
+      });
+      return response.text;
+    }
+    const controller = timeoutMs ? new AbortController() : void 0;
+    const timeout = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : void 0;
+    try {
+      const response = await fetch(resolvedUrl, {
+        credentials: "include",
+        redirect: "follow",
+        ...requestOptions,
+        signal: controller?.signal ?? requestOptions.signal,
+        headers: requestHeaders
+      });
+      const text = await response.text();
+      if (!response.ok) throw new Error(`\u8BF7\u6C42\u5931\u8D25 ${response.status}: ${text.slice(0, 200)}`);
+      return text;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") throw new Error(`\u8BF7\u6C42\u8D85\u65F6\uFF08${timeoutMs}ms\uFF09`);
+      throw error;
+    } finally {
+      if (timeout !== void 0) window.clearTimeout(timeout);
+    }
+  }
+  async function requestMultipartText(url, fields, fileField, file, timeoutMs = 3e4) {
+    const response = await sendBackendRequest({
+      kind: "multipart",
+      url: assertBackendUrl(url),
+      fields,
+      fileField,
+      fileName: file.name,
+      fileType: file.type || "application/octet-stream",
+      fileBase64: bytesToBase64(new Uint8Array(await file.arrayBuffer())),
+      timeoutMs
+    });
+    return response.text;
+  }
+  async function requestJson(url, options = {}) {
+    const text = await requestText(url, {
+      ...options,
+      accept: "application/json, text/javascript, */*; q=0.01",
+      headers: { "Content-Type": "text/json,charset=utf-8", ...options.headers }
+    });
+    try {
+      return JSON.parse(text);
+    } catch {
+      const htmlError = looksLikeHtml(text) ? detectHtmlError(text) : "";
+      if (htmlError) throw new Error(htmlError);
+      throw new Error(`\u63A5\u53E3\u8FD4\u56DE\u975E JSON \u5185\u5BB9: ${looksLikeHtml(text) ? summarizeHtml(text) : text.slice(0, 260)}`);
+    }
+  }
+  function sleep(milliseconds) {
+    return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+  }
+
   // src/api/quick-report.ts
   function parseMerchantIds(raw) {
     const merchantIds = raw.split(";").map((item) => item.trim()).filter(Boolean);
@@ -51,24 +211,35 @@
       };
     });
   }
-  async function submitQuickReport(merchantIds, reportType, reportMode = "SYT", fetchImpl = fetch) {
+  async function submitQuickReport(merchantIds, reportType, reportMode = "SYT", fetchImpl) {
     const body = new URLSearchParams({
       merchantIds: merchantIds.join(";"),
       reportType,
       reportMode
     });
-    const response = await fetchImpl("/lspos/atBatchTask.do?method=quickManualReport", {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        Accept: "application/json, text/javascript, */*; q=0.01",
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "X-Requested-With": "XMLHttpRequest"
-      },
-      body
-    });
-    const text = await response.text();
-    if (!response.ok) throw new Error(`\u6279\u91CF\u91CD\u7F6E\u8BF7\u6C42\u5931\u8D25 ${response.status}: ${text.slice(0, 200)}`);
+    const url = `${ORIGIN}/lspos/atBatchTask.do?method=quickManualReport`;
+    let text;
+    if (fetchImpl) {
+      const response = await fetchImpl(url, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/json, text/javascript, */*; q=0.01",
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "X-Requested-With": "XMLHttpRequest"
+        },
+        body
+      });
+      text = await response.text();
+      if (!response.ok) throw new Error(`\u6279\u91CF\u91CD\u7F6E\u8BF7\u6C42\u5931\u8D25 ${response.status}: ${text.slice(0, 200)}`);
+    } else {
+      text = await requestText(url, {
+        method: "POST",
+        accept: "application/json, text/javascript, */*; q=0.01",
+        headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+        body
+      });
+    }
     try {
       return parseQuickReportResponse(JSON.parse(text), merchantIds, reportType);
     } catch (error) {
@@ -112,98 +283,6 @@
     const copied = document.execCommand("copy");
     textarea.remove();
     if (!copied) throw new Error("\u6D4F\u89C8\u5668\u62D2\u7EDD\u590D\u5236\u6743\u9650");
-  }
-
-  // src/api/http.ts
-  var ORIGIN = "https://om.leshuazf.com";
-  var SAAS = `${ORIGIN}/saasadmin`;
-  var SYT_OMS = `${ORIGIN}/syt_oms`;
-  var USER_CENTER = `${ORIGIN}/lsuser_center`;
-  function normalizeText(value) {
-    return String(value ?? "").replace(/\s+/g, " ").trim();
-  }
-  function assertMerchantId(merchantId) {
-    if (!/^\d{10}$/.test(merchantId)) throw new Error("\u4E50\u5237\u5546\u6237\u53F7\u4E0D\u80FD\u4E3A\u7A7A\uFF0C\u4E14\u5FC5\u987B\u4E3A 10 \u4F4D\u6570\u5B57");
-  }
-  function buildFormBody(values) {
-    const body = new URLSearchParams();
-    Object.entries(values).forEach(([key, value]) => body.set(key, value == null ? "" : String(value)));
-    return body;
-  }
-  function pad(value) {
-    return String(value).padStart(2, "0");
-  }
-  function formatDateTime(date) {
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-  }
-  function getDateRange(options = {}) {
-    const end = /* @__PURE__ */ new Date();
-    const start = new Date(end);
-    if (options.years) start.setFullYear(start.getFullYear() - options.years);
-    else start.setDate(start.getDate() - (options.days ?? 1));
-    return { createStartTime: formatDateTime(start), createEndTime: formatDateTime(end) };
-  }
-  function getHtmlMessage(html) {
-    const document2 = new DOMParser().parseFromString(html, "text/html");
-    return normalizeText(document2.body?.textContent || html);
-  }
-  function summarizeHtml(html) {
-    const document2 = new DOMParser().parseFromString(html, "text/html");
-    const title = normalizeText(document2.querySelector("title")?.textContent);
-    const body = normalizeText(document2.body?.textContent || html);
-    return [title ? `\u6807\u9898: ${title}` : "", body ? `\u6B63\u6587: ${body.slice(0, 260)}` : ""].filter(Boolean).join("\uFF1B") || html.slice(0, 260);
-  }
-  function detectHtmlError(html) {
-    const message = getHtmlMessage(html);
-    if (message.includes("\u6CA1\u6709\u8BE5\u9879\u64CD\u4F5C\u6743\u9650")) return "\u6CA1\u6709\u8BE5\u9879\u64CD\u4F5C\u6743\u9650\uFF0C\u8BF7\u786E\u8BA4\u5F53\u524D\u8D26\u53F7\u5DF2\u5F00\u901A\u8BE5\u540E\u53F0\u64CD\u4F5C\u6743\u9650";
-    if (/登录|login|验证码/.test(message)) return "\u5F53\u524D\u767B\u5F55\u6001\u53EF\u80FD\u5DF2\u5931\u6548\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55\u8FD0\u8425\u540E\u53F0\u540E\u518D\u8BD5";
-    return "";
-  }
-  function looksLikeHtml(text) {
-    return /^\s*<!doctype html/i.test(text) || /^\s*<html[\s>]/i.test(text);
-  }
-  async function requestText(url, options = {}) {
-    const { accept, timeoutMs, headers, ...requestOptions } = options;
-    const controller = timeoutMs ? new AbortController() : void 0;
-    const timeout = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : void 0;
-    try {
-      const response = await fetch(url, {
-        credentials: "include",
-        redirect: "follow",
-        ...requestOptions,
-        signal: controller?.signal ?? requestOptions.signal,
-        headers: {
-          Accept: accept || "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "X-Requested-With": "XMLHttpRequest",
-          ...headers
-        }
-      });
-      const text = await response.text();
-      if (!response.ok) throw new Error(`\u8BF7\u6C42\u5931\u8D25 ${response.status}: ${text.slice(0, 200)}`);
-      return text;
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") throw new Error(`\u8BF7\u6C42\u8D85\u65F6\uFF08${timeoutMs}ms\uFF09`);
-      throw error;
-    } finally {
-      if (timeout !== void 0) window.clearTimeout(timeout);
-    }
-  }
-  async function requestJson(url, options = {}) {
-    const text = await requestText(url, {
-      ...options,
-      accept: "application/json, text/javascript, */*; q=0.01",
-      headers: { "Content-Type": "text/json,charset=utf-8", ...options.headers }
-    });
-    try {
-      return JSON.parse(text);
-    } catch {
-      const htmlError = looksLikeHtml(text) ? detectHtmlError(text) : "";
-      if (htmlError) throw new Error(htmlError);
-      throw new Error(`\u63A5\u53E3\u8FD4\u56DE\u975E JSON \u5185\u5BB9: ${looksLikeHtml(text) ? summarizeHtml(text) : text.slice(0, 260)}`);
-    }
-  }
-  function sleep(milliseconds) {
-    return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
   }
 
   // src/api/payment-config.ts
@@ -987,6 +1066,15 @@
   }
   async function submitCodePlateTransferViaNativeForm(file, options = {}) {
     if (!(file instanceof Blob)) throw new Error("\u5F85\u4E0A\u4F20\u7684\u7801\u724C\u6A21\u677F\u6587\u4EF6\u65E0\u6548");
+    if (!isOperationsBackendPage()) {
+      return requestMultipartText(
+        options.actionUrl || `${SAAS}/qrCodeState.do?method=distributeBatch`,
+        { submit: "\u786E\u8BA4\u63D0\u4EA4" },
+        "distributeBatchFormFile",
+        file,
+        options.uploadTimeoutMs == null ? 3e4 : options.uploadTimeoutMs
+      );
+    }
     const pageWindow = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
     const PageFile = pageWindow.File || File;
     const PageDataTransfer = pageWindow.DataTransfer || DataTransfer;
@@ -1214,9 +1302,18 @@
     if (Number(payload?.code) === 0 && payload?.success === true) return payload.data;
     throw new Error(payload?.msg || "\u540E\u53F0\u672A\u8FD4\u56DE\u6210\u529F\u7ED3\u679C");
   }
-  async function request(method, values, fetchImpl = fetch) {
+  async function request(method, values, fetchImpl) {
     const body = new URLSearchParams(values);
-    const response = await fetchImpl(`${ENDPOINT}?method=${encodeURIComponent(method)}`, {
+    const url = `${ORIGIN}${ENDPOINT}?method=${encodeURIComponent(method)}`;
+    if (!fetchImpl) {
+      const payload = await requestJson(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+        body
+      });
+      return assertSuccess(payload);
+    }
+    const response = await fetchImpl(url, {
       method: "POST",
       credentials: "include",
       headers: {
@@ -1247,7 +1344,7 @@
     if (!trim(values.oldAgentId) || !trim(values.newAgentId)) throw new Error("\u8BF7\u5148\u67E5\u8BE2\u65E7\u4EE3\u7406\u5546\u548C\u65B0\u4EE3\u7406\u5546\u4FE1\u606F");
     if (trim(values.oldAgentId) === trim(values.newAgentId)) throw new Error("\u65B0\u65E7\u4EE3\u7406\u5546\u7F16\u53F7\u4E0D\u80FD\u76F8\u540C");
   }
-  async function queryOldDeviceAgent(sn, fetchImpl = fetch) {
+  async function queryOldDeviceAgent(sn, fetchImpl) {
     const deviceSn = trim(sn);
     if (!deviceSn) throw new Error("\u8BF7\u8F93\u5165\u4E50\u5237 SN \u59CB");
     const data = await request("changeAgentCheckSn", {
@@ -1258,7 +1355,7 @@
     if (!id) throw new Error("\u63A5\u53E3\u672A\u8FD4\u56DE\u65E7\u4EE3\u7406\u5546\u7F16\u53F7");
     return toAgent(data, id);
   }
-  async function queryNewDeviceAgent(sn, oldAgentId, newAgentId, fetchImpl = fetch) {
+  async function queryNewDeviceAgent(sn, oldAgentId, newAgentId, fetchImpl) {
     const deviceSn = trim(sn);
     const oldId = trim(oldAgentId);
     const newId = trim(newAgentId);
@@ -1271,7 +1368,7 @@
     return toAgent(data, newId);
   }
   var wait = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-  async function submitDeviceTransfer(values, onStep, fetchImpl = fetch) {
+  async function submitDeviceTransfer(values, onStep, fetchImpl) {
     validateDeviceTransfer(values);
     const requestValues = {
       pinpadUuidStart: trim(values.sn),
@@ -1291,7 +1388,9 @@
   var submitDeviceTransfer2 = (values, onStep) => submitDeviceTransfer(values, onStep);
 
   // src/content/index.ts
-  var VERSION = "1.0.2";
+  var VERSION = "1.0.3";
+  var OPERATIONS_ORIGIN = "https://om.leshuazf.com";
+  var CUSTOMER_SERVICE_ORIGIN = "https://h5.leshuazf.com";
   var FLOAT_TOP_STORAGE_KEY = "syt-extension-float-top";
   var FLOAT_SIZE = 54;
   var FLOAT_VIEWPORT_GAP = 8;
@@ -1751,9 +1850,19 @@
     });
     applyPreset();
   }
-  function bootstrap() {
-    if (window.top !== window.self) return;
-    createPanel();
+  function isSupportedPage() {
+    if (window.location.origin === OPERATIONS_ORIGIN) return true;
+    return window.location.origin === CUSTOMER_SERVICE_ORIGIN && window.location.pathname.startsWith("/wap/customer-service/") && window.location.hash.startsWith("#/Online");
   }
-  bootstrap();
+  function syncPanel() {
+    if (window.top !== window.self) return;
+    const panel = document.getElementById("syt-extension-root");
+    if (!isSupportedPage()) {
+      panel?.remove();
+      return;
+    }
+    if (!panel) createPanel();
+  }
+  window.addEventListener("hashchange", syncPanel);
+  syncPanel();
 })();

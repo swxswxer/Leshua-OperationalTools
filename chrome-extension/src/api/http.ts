@@ -1,3 +1,10 @@
+import type {
+  BackendMultipartRequest,
+  BackendRequestMessage,
+  BackendResponseMessage,
+  BackendTextRequest,
+} from '../types';
+
 export const ORIGIN = 'https://om.leshuazf.com';
 export const SAAS = `${ORIGIN}/saasadmin`;
 export const SYT_OMS = `${ORIGIN}/syt_oms`;
@@ -5,6 +12,51 @@ export const USER_CENTER = `${ORIGIN}/lsuser_center`;
 
 export type FormValue = string | number | boolean | null | undefined;
 export type RequestOptions = RequestInit & { accept?: string; timeoutMs?: number };
+
+export function isOperationsBackendPage(): boolean {
+  return window.location.origin === ORIGIN;
+}
+
+function assertBackendUrl(url: string): string {
+  const resolved = new URL(url, ORIGIN);
+  if (resolved.origin !== ORIGIN) throw new Error(`禁止请求非运营后台地址: ${resolved.origin}`);
+  return resolved.href;
+}
+
+async function sendBackendRequest(request: BackendTextRequest | BackendMultipartRequest): Promise<BackendResponseMessage> {
+  const message: BackendRequestMessage = { type: 'operations:backend-request', request };
+  try {
+    const response = await chrome.runtime.sendMessage(message) as BackendResponseMessage | undefined;
+    if (!response) throw new Error('扩展后台没有返回请求结果');
+    if (!response.ok) throw new Error(response.error || `请求失败 ${response.status}: ${response.text.slice(0, 200)}`);
+    return response;
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : String(error);
+    throw new Error(`无法连接运营后台: ${messageText}`);
+  }
+}
+
+function serializeBody(body: BodyInit | null | undefined): string | undefined {
+  if (body == null) return undefined;
+  if (typeof body === 'string') return body;
+  if (body instanceof URLSearchParams) return body.toString();
+  throw new Error('当前跨域请求只支持文本或表单参数');
+}
+
+function headersToRecord(headers: HeadersInit | undefined): Record<string, string> {
+  const output: Record<string, string> = {};
+  new Headers(headers).forEach((value, key) => { output[key] = value; });
+  return output;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
 
 export function normalizeText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -69,19 +121,33 @@ export function looksLikeHtml(text: string): boolean {
 
 export async function requestText(url: string, options: RequestOptions = {}): Promise<string> {
   const { accept, timeoutMs, headers, ...requestOptions } = options;
+  const resolvedUrl = assertBackendUrl(url);
+  const requestHeaders = {
+    Accept: accept || 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'X-Requested-With': 'XMLHttpRequest',
+    ...headersToRecord(headers),
+  };
+  if (!isOperationsBackendPage()) {
+    const response = await sendBackendRequest({
+      kind: 'text',
+      url: resolvedUrl,
+      method: requestOptions.method || 'GET',
+      headers: requestHeaders,
+      body: serializeBody(requestOptions.body),
+      cache: requestOptions.cache,
+      timeoutMs,
+    });
+    return response.text;
+  }
   const controller = timeoutMs ? new AbortController() : undefined;
   const timeout = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : undefined;
   try {
-    const response = await fetch(url, {
+    const response = await fetch(resolvedUrl, {
       credentials: 'include',
       redirect: 'follow',
       ...requestOptions,
       signal: controller?.signal ?? requestOptions.signal,
-      headers: {
-        Accept: accept || 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'X-Requested-With': 'XMLHttpRequest',
-        ...headers,
-      },
+      headers: requestHeaders,
     });
     const text = await response.text();
     if (!response.ok) throw new Error(`请求失败 ${response.status}: ${text.slice(0, 200)}`);
@@ -92,6 +158,26 @@ export async function requestText(url: string, options: RequestOptions = {}): Pr
   } finally {
     if (timeout !== undefined) window.clearTimeout(timeout);
   }
+}
+
+export async function requestMultipartText(
+  url: string,
+  fields: Record<string, string>,
+  fileField: string,
+  file: File,
+  timeoutMs = 30000,
+): Promise<string> {
+  const response = await sendBackendRequest({
+    kind: 'multipart',
+    url: assertBackendUrl(url),
+    fields,
+    fileField,
+    fileName: file.name,
+    fileType: file.type || 'application/octet-stream',
+    fileBase64: bytesToBase64(new Uint8Array(await file.arrayBuffer())),
+    timeoutMs,
+  });
+  return response.text;
 }
 
 export async function requestJson<T>(url: string, options: RequestOptions = {}): Promise<T> {

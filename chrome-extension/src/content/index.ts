@@ -14,7 +14,9 @@ import { addChangeWhitelist } from '../tools/change-whitelist';
 import { bindLatestWechatPaymentConfig } from '../tools/payment-config';
 import { queryNewDeviceAgent, queryOldDeviceAgent, submitDeviceTransfer, type DeviceTransferValues } from '../tools/device-transfer';
 
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
+const OPERATIONS_ORIGIN = 'https://om.leshuazf.com';
+const CUSTOMER_SERVICE_ORIGIN = 'https://h5.leshuazf.com';
 const FLOAT_TOP_STORAGE_KEY = 'syt-extension-float-top';
 const FLOAT_SIZE = 54;
 const FLOAT_VIEWPORT_GAP = 8;
@@ -465,9 +467,22 @@ function createPanel(): void {
   applyPreset();
 }
 
-function bootstrap(): void {
-  if (window.top !== window.self) return;
-  createPanel();
+function isSupportedPage(): boolean {
+  if (window.location.origin === OPERATIONS_ORIGIN) return true;
+  return window.location.origin === CUSTOMER_SERVICE_ORIGIN
+    && window.location.pathname.startsWith('/wap/customer-service/')
+    && window.location.hash.startsWith('#/Online');
 }
 
-bootstrap();
+function syncPanel(): void {
+  if (window.top !== window.self) return;
+  const panel = document.getElementById('syt-extension-root');
+  if (!isSupportedPage()) {
+    panel?.remove();
+    return;
+  }
+  if (!panel) createPanel();
+}
+
+window.addEventListener('hashchange', syncPanel);
+syncPanel();

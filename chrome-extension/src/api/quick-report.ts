@@ -1,3 +1,5 @@
+import { ORIGIN, requestText } from './http';
+
 export type ReportType = 'WECHAT' | 'ALIPAY' | 'ALL';
 export type ChannelName = 'wechat' | 'alipay';
 export type ReportMode = 'SYT' | 'COMMON';
@@ -120,25 +122,36 @@ export async function submitQuickReport(
   merchantIds: string[],
   reportType: ReportType,
   reportMode: ReportMode = 'SYT',
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl?: typeof fetch,
 ): Promise<MerchantReportResult[]> {
   const body = new URLSearchParams({
     merchantIds: merchantIds.join(';'),
     reportType,
     reportMode,
   });
-  const response = await fetchImpl('/lspos/atBatchTask.do?method=quickManualReport', {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      Accept: 'application/json, text/javascript, */*; q=0.01',
-      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-      'X-Requested-With': 'XMLHttpRequest',
-    },
-    body,
-  });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`批量重置请求失败 ${response.status}: ${text.slice(0, 200)}`);
+  const url = `${ORIGIN}/lspos/atBatchTask.do?method=quickManualReport`;
+  let text: string;
+  if (fetchImpl) {
+    const response = await fetchImpl(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json, text/javascript, */*; q=0.01',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      body,
+    });
+    text = await response.text();
+    if (!response.ok) throw new Error(`批量重置请求失败 ${response.status}: ${text.slice(0, 200)}`);
+  } else {
+    text = await requestText(url, {
+      method: 'POST',
+      accept: 'application/json, text/javascript, */*; q=0.01',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+      body,
+    });
+  }
   try {
     return parseQuickReportResponse(JSON.parse(text), merchantIds, reportType);
   } catch (error) {

@@ -2,7 +2,7 @@
 // The embedded official workbook template is intentionally kept byte-for-byte.
 import {
   ORIGIN, SAAS, USER_CENTER, buildFormBody, detectHtmlError, getHtmlMessage,
-  normalizeText, requestText, sleep, summarizeHtml,
+  isOperationsBackendPage, normalizeText, requestMultipartText, requestText, sleep, summarizeHtml,
 } from './http';
   const CODE_PLATE_RESULT_SUBJECT = '码牌批量转移处理结果';
   const CODE_PLATE_RESULT_SOURCE = '码牌管理-码牌转移';
@@ -357,6 +357,15 @@ import {
 
   async function submitCodePlateTransferViaNativeForm(file, options = {}) {
     if (!(file instanceof Blob)) throw new Error('待上传的码牌模板文件无效');
+    if (!isOperationsBackendPage()) {
+      return requestMultipartText(
+        options.actionUrl || `${SAAS}/qrCodeState.do?method=distributeBatch`,
+        { submit: '确认提交' },
+        'distributeBatchFormFile',
+        file,
+        options.uploadTimeoutMs == null ? 30000 : options.uploadTimeoutMs,
+      );
+    }
     const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
     const PageFile = pageWindow.File || File;
     const PageDataTransfer = pageWindow.DataTransfer || DataTransfer;

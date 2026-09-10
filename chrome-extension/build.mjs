@@ -7,9 +7,12 @@ const dist = new URL('./dist/', root);
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 await build({
-  entryPoints: [new URL('./src/content/index.ts', root).pathname],
+  entryPoints: {
+    content: new URL('./src/content/index.ts', root).pathname,
+    background: new URL('./src/background/index.ts', root).pathname,
+  },
   bundle: true,
-  outfile: new URL('./content.js', dist).pathname,
+  outdir: dist.pathname,
   target: ['chrome120'],
   format: 'iife',
   sourcemap: false,

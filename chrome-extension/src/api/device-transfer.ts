@@ -1,3 +1,5 @@
+import { ORIGIN, requestJson } from './http';
+
 export interface DeviceTransferValues {
   sn: string;
   quantity: '1';
@@ -39,9 +41,18 @@ function assertSuccess<T>(payload: DeviceTransferResponse<T>): T {
   throw new Error(payload?.msg || '后台未返回成功结果');
 }
 
-async function request<T>(method: string, values: Record<string, string>, fetchImpl: typeof fetch = fetch): Promise<T> {
+async function request<T>(method: string, values: Record<string, string>, fetchImpl?: typeof fetch): Promise<T> {
   const body = new URLSearchParams(values);
-  const response = await fetchImpl(`${ENDPOINT}?method=${encodeURIComponent(method)}`, {
+  const url = `${ORIGIN}${ENDPOINT}?method=${encodeURIComponent(method)}`;
+  if (!fetchImpl) {
+    const payload = await requestJson<DeviceTransferResponse<T>>(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+      body,
+    });
+    return assertSuccess(payload);
+  }
+  const response = await fetchImpl(url, {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -75,7 +86,7 @@ export function validateDeviceTransfer(values: DeviceTransferValues): void {
   if (trim(values.oldAgentId) === trim(values.newAgentId)) throw new Error('新旧代理商编号不能相同');
 }
 
-export async function queryOldDeviceAgent(sn: string, fetchImpl: typeof fetch = fetch): Promise<DeviceAgent> {
+export async function queryOldDeviceAgent(sn: string, fetchImpl?: typeof fetch): Promise<DeviceAgent> {
   const deviceSn = trim(sn);
   if (!deviceSn) throw new Error('请输入乐刷 SN 始');
   const data = await request<AgentResponseData>('changeAgentCheckSn', {
@@ -91,7 +102,7 @@ export async function queryNewDeviceAgent(
   sn: string,
   oldAgentId: string,
   newAgentId: string,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl?: typeof fetch,
 ): Promise<DeviceAgent> {
   const deviceSn = trim(sn);
   const oldId = trim(oldAgentId);
@@ -110,7 +121,7 @@ const wait = (milliseconds: number) => new Promise<void>((resolve) => window.set
 export async function submitDeviceTransfer(
   values: DeviceTransferValues,
   onStep?: (message: string) => void,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl?: typeof fetch,
 ): Promise<void> {
   validateDeviceTransfer(values);
   const requestValues = {
