@@ -20,7 +20,9 @@ npm run build
 - 自定义渠道重置：填写完整的渠道号和渠道主体后，统一执行上报、确认新号启用与旧号关闭流程。
 - 微信支付参数绑定：可对新号或商户最新微信映射记录绑定 appid、支付授权目录。
 - 配置商户 key：与重置页共用乐刷商户号输入框，支持使用英文 `;` 分隔任意数量的商户号；内部最多同时处理 5 个请求。
-- 码牌划转、防切户白名单、机具划拨：分别作为独立工具页面。
+- 码牌划转、防切户白名单、收银通机具划拨、联合收单机具划拨：分别作为独立工具页面。联合收单机具划拨只需填写 SN、旧代理商编号和新代理商编号。
+- 设备换绑配置：独立页面输入乐刷 SN、单日/单月最大绑定次数（留空默认 3）和结算主体白名单（默认是）。先查询精确匹配的 SN 配置，有记录则修改，无记录则新增；修改保留原累计最大商户数和累计最大绑定次数。查询失败、记录不唯一或存在多页时停止，不自动新增。新增依据 JSON 的 `success: true`，修改依据 HTML 的“操作成功”确认结果；保存请求不自动重试。
+- 插件 1.0.5 新增设备换绑配置，接口与业务分别位于 `src/api/device-bind-config.ts` 和 `src/tools/device-bind-config.ts`。
 
 “开通在线收款单”已删除，不再提供入口或请求实现。
 
@@ -42,7 +44,8 @@ chrome-extension/src/
 │   ├── merchant-key.ts          # 商户 key 接口
 │   ├── code-plate.ts            # 码牌模板、上传及消息查询接口
 │   ├── whitelist.ts             # 防切户白名单接口
-│   └── device-transfer.ts       # 机具代理查询及划拨接口
+│   ├── device-transfer.ts       # 机具代理查询及划拨接口
+│   └── device-bind-config.ts    # 设备换绑查询、新增及修改接口
 ├── tools/
 │   ├── batch-reset.ts           # 默认批量重置流程
 │   ├── custom-channel-reset.ts  # 自定义渠道重置流程
@@ -50,7 +53,8 @@ chrome-extension/src/
 │   ├── merchant-key.ts          # 配置商户 key 流程
 │   ├── code-plate-transfer.ts   # 码牌划转流程
 │   ├── change-whitelist.ts      # 防切户白名单流程
-│   └── device-transfer.ts       # 机具划拨流程
+│   ├── device-transfer.ts       # 机具划拨流程
+│   └── device-bind-config.ts    # 设备换绑配置：先查询后修改或新增
 ├── content/
 │   ├── index.ts                 # 悬浮窗和页面交互
 │   └── helpers.ts               # 纯界面辅助函数

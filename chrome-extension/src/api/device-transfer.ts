@@ -17,6 +17,17 @@ export interface DeviceAgent {
   type: string;
 }
 
+export interface LhsdDeviceTransferValues {
+  sn: string;
+  oldAgentId: string;
+  newAgentId: string;
+}
+
+export interface LhsdDeviceTransferResult {
+  count: number;
+  message: string;
+}
+
 interface DeviceTransferResponse<T> {
   code?: number | string;
   msg?: string | null;
@@ -30,7 +41,17 @@ interface AgentResponseData {
   agentClassName?: string;
 }
 
+interface LhsdDeviceTransferResponse {
+  error_code?: string | number;
+  error_msg?: string | null;
+  count?: string | number;
+  data?: unknown;
+  fail?: boolean;
+  success?: boolean;
+}
+
 const ENDPOINT = '/base-business/pinpad/newTerminal.do';
+const LHSD_TRANSFER_ENDPOINT = '/uts_platform/machine/manager/machineChangeAgent.do';
 
 function trim(value: string): string {
   return value.trim();
@@ -134,4 +155,65 @@ export async function submitDeviceTransfer(
   onStep?.('校验通过，0.5 秒后发起正式划拨');
   await wait(500);
   await request<null>('changeAgent', requestValues, fetchImpl);
+}
+
+export function validateLhsdDeviceTransfer(values: LhsdDeviceTransferValues): LhsdDeviceTransferValues {
+  const normalized = {
+    sn: trim(values.sn),
+    oldAgentId: trim(values.oldAgentId),
+    newAgentId: trim(values.newAgentId),
+  };
+  if (!normalized.sn) throw new Error('请输入 SN');
+  if (!/^\d+$/.test(normalized.oldAgentId)) throw new Error('旧代理商编号不能为空，且必须为数字');
+  if (!/^\d+$/.test(normalized.newAgentId)) throw new Error('新代理商编号不能为空，且必须为数字');
+  if (normalized.oldAgentId === normalized.newAgentId) throw new Error('新旧代理商编号不能相同');
+  return normalized;
+}
+
+function parseLhsdDeviceTransferResult(payload: LhsdDeviceTransferResponse): LhsdDeviceTransferResult {
+  const success = String(payload.error_code) === '0' || (payload.success === true && payload.fail !== true);
+  if (!success) throw new Error(payload.error_msg || '联合收单机具划拨失败');
+  return {
+    count: Number(payload.count || 0),
+    message: payload.error_msg || '划拨成功',
+  };
+}
+
+export async function submitLhsdDeviceTransfer(
+  values: LhsdDeviceTransferValues,
+  fetchImpl?: typeof fetch,
+): Promise<LhsdDeviceTransferResult> {
+  const normalized = validateLhsdDeviceTransfer(values);
+  const body = new URLSearchParams({
+    sn: normalized.sn,
+    oldAgentId: normalized.oldAgentId,
+    newAgentId: normalized.newAgentId,
+  });
+  const url = `${ORIGIN}${LHSD_TRANSFER_ENDPOINT}`;
+  if (!fetchImpl) {
+    const payload = await requestJson<LhsdDeviceTransferResponse>(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+      body,
+    });
+    return parseLhsdDeviceTransferResult(payload);
+  }
+  const response = await fetchImpl(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json, text/javascript, */*; q=0.01',
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+    body,
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`请求失败 ${response.status}: ${text.slice(0, 200)}`);
+  try {
+    return parseLhsdDeviceTransferResult(JSON.parse(text) as LhsdDeviceTransferResponse);
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error(`接口返回非 JSON 内容: ${text.slice(0, 200)}`);
+    throw error;
+  }
 }

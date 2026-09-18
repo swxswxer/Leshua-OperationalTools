@@ -12,9 +12,17 @@ import { configureMerchantKeys, parseMerchantKeyIds } from '../tools/merchant-ke
 import { transferCodePlates } from '../tools/code-plate-transfer';
 import { addChangeWhitelist } from '../tools/change-whitelist';
 import { bindLatestWechatPaymentConfig } from '../tools/payment-config';
-import { queryNewDeviceAgent, queryOldDeviceAgent, submitDeviceTransfer, type DeviceTransferValues } from '../tools/device-transfer';
+import { saveDeviceBindConfig } from '../tools/device-bind-config';
+import {
+  queryNewDeviceAgent,
+  queryOldDeviceAgent,
+  submitDeviceTransfer,
+  submitLhsdDeviceTransfer,
+  type DeviceTransferValues,
+  type LhsdDeviceTransferValues,
+} from '../tools/device-transfer';
 
-const VERSION = '1.0.3';
+const VERSION = '1.0.5';
 const OPERATIONS_ORIGIN = 'https://om.leshuazf.com';
 const CUSTOMER_SERVICE_ORIGIN = 'https://h5.leshuazf.com';
 const FLOAT_TOP_STORAGE_KEY = 'syt-extension-float-top';
@@ -80,10 +88,17 @@ function createPanel(): void {
           <div class="shared-tool-actions"><button id="syt-run-key" type="button">配置商户 key</button></div>
           <div id="syt-reset-status" class="status"></div>
           <div class="section-title">本次重置结果</div><div class="result-table-wrap"><table><thead><tr><th>乐刷商户号</th><th>微信子商户号</th><th>支付宝子商户号</th><th>方式</th></tr></thead><tbody id="syt-results"><tr><td colspan="4" class="empty">执行后显示结果</td></tr></tbody></table></div>
-          <div class="actions"><button id="syt-copy" type="button" disabled>复制结果</button><button class="nav-tool" data-view="code" type="button">码牌划转</button><button class="nav-tool" data-view="device" type="button">收银通机具划拨</button><button class="nav-tool" data-view="whitelist" type="button">防切户白名单</button></div>
+          <div class="actions"><button id="syt-copy" type="button" disabled>复制结果</button><button class="nav-tool" data-view="code" type="button">码牌划转</button><div class="device-tool-actions"><button class="nav-tool" data-view="device" type="button">收银通机具划拨</button><button class="nav-tool" data-view="lhsd-device" type="button">联合收单机具划拨</button></div><button class="nav-tool" data-view="whitelist" type="button">防切户白名单</button><button class="nav-tool" data-view="bind-config" type="button">设备换绑配置</button></div>
+        </section>
+        <section id="syt-view-bind-config" class="view">
+          <label>乐刷 SN（必填）<input id="syt-bind-config-sn" autocomplete="off" required></label>
+          <div class="form-row"><label>单日最大绑定次数<input id="syt-bind-config-day" type="number" min="0" step="1" value="3" placeholder="3"></label><label>单月最大绑定次数<input id="syt-bind-config-month" type="number" min="0" step="1" value="3" placeholder="3"></label></div>
+          <fieldset class="business-line"><legend>结算主体白名单</legend><label><input type="radio" name="syt-bind-config-whitelist" value="1" checked>是</label><label><input type="radio" name="syt-bind-config-whitelist" value="0">否</label></fieldset>
+          <button id="syt-run-bind-config" class="primary" type="button">确认配置</button><div id="syt-bind-config-status" class="status" role="status"></div>
         </section>
         <section id="syt-view-code" class="view"><div class="form-row"><label>码牌开始编号<input id="syt-code-start" autocomplete="off"></label><label>码牌结束编号<input id="syt-code-end" autocomplete="off"></label></div><div class="form-row"><label>原代理商<input id="syt-code-source" autocomplete="off"></label><label>新代理商<input id="syt-code-target" autocomplete="off"></label></div><button id="syt-run-code" class="primary" type="button">确认划转</button><div id="syt-code-status" class="status"></div></section>
         <section id="syt-view-device" class="view"><div class="section-title">机具信息</div><div class="form-row"><label>乐刷 SN 始<input id="syt-device-sn" autocomplete="off"></label><label>数量<input id="syt-device-quantity" value="1" readonly></label></div><button id="syt-device-query-old" type="button">查询旧代理商</button><div class="section-title">旧代理商</div><label>旧代理商编号<input id="syt-device-old-id" readonly></label><label>旧代理商名称<input id="syt-device-old-name" readonly></label><label>旧代理商类型<input id="syt-device-old-type" readonly></label><div class="section-title">新代理商</div><label>新代理商编号<input id="syt-device-new-id" autocomplete="off"></label><label>新代理商名称<input id="syt-device-new-name" readonly></label><label>新代理商类型<input id="syt-device-new-type" readonly></label><button id="syt-run-device" class="primary" type="button">确认划拨</button><div id="syt-device-status" class="status"></div></section>
+        <section id="syt-view-lhsd-device" class="view"><label>SN<input id="syt-lhsd-device-sn" autocomplete="off"></label><label>旧代理商编号<input id="syt-lhsd-device-old-id" autocomplete="off"></label><label>新代理商编号<input id="syt-lhsd-device-new-id" autocomplete="off"></label><button id="syt-run-lhsd-device" class="primary" type="button">确认划拨</button><div id="syt-lhsd-device-status" class="status"></div></section>
         <section id="syt-view-whitelist" class="view"><div class="form-row"><label>手机号<input id="syt-white-mobile" autocomplete="off"></label><label>身份证号<input id="syt-white-id" autocomplete="off"></label></div><div class="form-row"><label>营业执照号<input id="syt-white-license" autocomplete="off"></label><label>结算账号<input id="syt-white-account" autocomplete="off"></label></div><button id="syt-run-whitelist" class="primary" type="button">添加防切户白名单</button><div id="syt-white-status" class="status"></div></section>
         <section class="log"><div class="log-actions"><button id="syt-log-toggle" type="button">展开日志</button><button id="syt-log-clear" type="button">清空日志</button></div><div id="syt-log-preview">等待执行</div><pre id="syt-log-full"></pre></section>
       </main>
@@ -207,7 +222,7 @@ function createPanel(): void {
   const showView = (name: string) => {
     root.querySelectorAll<HTMLElement>('.view').forEach((view) => view.classList.toggle('active', view.id === `syt-view-${name}`));
     backButton.classList.toggle('visible', name !== 'reset');
-    title.textContent = `${name === 'reset' ? '运营工具' : ({ code: '码牌划转', device: '机具划拨', whitelist: '防切户白名单' } as Record<string, string>)[name]} v${VERSION}`;
+    title.textContent = `${name === 'reset' ? '运营工具' : ({ code: '码牌划转', device: '收银通机具划拨', 'lhsd-device': '联合收单机具划拨', 'bind-config': '设备换绑配置', whitelist: '防切户白名单' } as Record<string, string>)[name]} v${VERSION}`;
   };
   const applyPreset = () => {
     const option = PRESETS[Number(preset.value)] || PRESETS[0];
@@ -454,6 +469,57 @@ function createPanel(): void {
       log(`机具划拨失败: ${message}`, true);
     } finally {
       setDeviceBusy(false);
+    }
+  });
+  const lhsdDeviceSubmit = byId<HTMLButtonElement>(root, 'syt-run-lhsd-device');
+  const lhsdDeviceStatus = byId<HTMLElement>(root, 'syt-lhsd-device-status');
+  lhsdDeviceSubmit.addEventListener('click', async () => {
+    if (lhsdDeviceSubmit.disabled) return;
+    const values: LhsdDeviceTransferValues = {
+      sn: byId<HTMLInputElement>(root, 'syt-lhsd-device-sn').value.trim(),
+      oldAgentId: byId<HTMLInputElement>(root, 'syt-lhsd-device-old-id').value.trim(),
+      newAgentId: byId<HTMLInputElement>(root, 'syt-lhsd-device-new-id').value.trim(),
+    };
+    lhsdDeviceSubmit.disabled = true;
+    try {
+      setStatus(lhsdDeviceStatus, '正在发起联合收单机具划拨...');
+      const result = await submitLhsdDeviceTransfer(values);
+      const countText = result.count > 0 ? `，处理数量 ${result.count}` : '';
+      setStatus(lhsdDeviceStatus, `联合收单机具划拨成功${countText}`);
+      log(`联合收单机具 ${values.sn} 划拨成功: ${values.oldAgentId} -> ${values.newAgentId}${countText}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(lhsdDeviceStatus, `联合收单机具划拨失败: ${message}`, true);
+      log(`联合收单机具划拨失败: ${message}`, true);
+    } finally {
+      lhsdDeviceSubmit.disabled = false;
+    }
+  });
+  const bindConfigView = byId<HTMLElement>(root, 'syt-view-bind-config');
+  const bindConfigSubmit = byId<HTMLButtonElement>(root, 'syt-run-bind-config');
+  bindConfigSubmit.addEventListener('click', async () => {
+    if (bindConfigSubmit.disabled) return;
+    const status = byId<HTMLElement>(root, 'syt-bind-config-status');
+    const values = {
+      sn: byId<HTMLInputElement>(root, 'syt-bind-config-sn').value,
+      perDayBindTimes: byId<HTMLInputElement>(root, 'syt-bind-config-day').value,
+      perMonthBindTimes: byId<HTMLInputElement>(root, 'syt-bind-config-month').value,
+      whiteList: bindConfigView.querySelector<HTMLInputElement>('input[name="syt-bind-config-whitelist"]:checked')?.value as '1' | '0',
+    };
+    const controls = bindConfigView.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button');
+    controls.forEach((control) => { control.disabled = true; });
+    bindConfigSubmit.textContent = '处理中...';
+    try {
+      setStatus(status, '正在查询并保存设备换绑配置...');
+      const action = await saveDeviceBindConfig(values, log);
+      setStatus(status, `设备换绑配置${action === 'created' ? '新增' : '修改'}成功`);
+    } catch (error) {
+      const message = `设备换绑配置失败: ${error instanceof Error ? error.message : String(error)}`;
+      setStatus(status, message, true);
+      log(message, true);
+    } finally {
+      controls.forEach((control) => { control.disabled = false; });
+      bindConfigSubmit.textContent = '确认配置';
     }
   });
   byId<HTMLButtonElement>(root, 'syt-run-whitelist').addEventListener('click', async () => {

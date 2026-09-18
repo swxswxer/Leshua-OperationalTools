@@ -1293,8 +1293,108 @@
     return bindWechatPaymentConfig(merchantId, row.wxSubMchId, options);
   }
 
+  // src/api/device-bind-config.ts
+  var ENDPOINT = `${ORIGIN}/base-business/pinpad/bindConfigManage.do`;
+  var FORM_HEADERS = { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" };
+  function parsePage(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    doc.querySelectorAll("script, style").forEach((element) => element.remove());
+    const error = detectHtmlError(doc.documentElement.outerHTML);
+    if (error) throw new Error(error);
+    return doc;
+  }
+  function parseDeviceBindConfig(html, sn) {
+    const doc = parsePage(html);
+    const table = Array.from(doc.querySelectorAll("table")).find((element) => {
+      const headers2 = Array.from(element.querySelectorAll("th")).map((th) => normalizeText(th.textContent));
+      return headers2.includes("\u914D\u7F6E\u7EF4\u5EA6") && headers2.includes("\u7EF4\u5EA6\u6807\u8BC6") && headers2.includes("\u7D2F\u8BA1\u6700\u5927\u7ED1\u5B9A\u6B21\u6570");
+    });
+    if (!table) throw new Error("\u65E0\u6CD5\u8BC6\u522B\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E\u67E5\u8BE2\u7ED3\u679C\uFF0C\u672A\u63D0\u4EA4\u4FEE\u6539\u6216\u65B0\u589E");
+    const headers = Array.from(table.querySelectorAll("th")).map((th) => normalizeText(th.textContent));
+    const matches = [];
+    for (const row of Array.from(table.querySelectorAll("tr"))) {
+      const cells = Array.from(row.children).filter((cell) => cell.tagName === "TD");
+      const value = (name) => normalizeText(cells[headers.indexOf(name)]?.textContent);
+      if (value("\u914D\u7F6E\u7EF4\u5EA6") !== "\u4E50\u5237SN" || value("\u7EF4\u5EA6\u6807\u8BC6") !== sn) continue;
+      const id = Array.from(row.querySelectorAll("[onclick]")).map(
+        (element) => element.getAttribute("onclick")?.match(/\btoEdit\(['"](\d+)['"]\)/)?.[1]
+      ).find(Boolean);
+      if (!id) throw new Error("\u67E5\u8BE2\u5230\u914D\u7F6E\u4F46\u7F3A\u5C11\u53EF\u4FEE\u6539\u7684\u8BB0\u5F55 ID\uFF0C\u8BF7\u68C0\u67E5\u6743\u9650");
+      matches.push({ id, maxBindMchCount: value("\u7D2F\u8BA1\u6700\u5927\u5546\u6237\u6570"), maxBindCount: value("\u7D2F\u8BA1\u6700\u5927\u7ED1\u5B9A\u6B21\u6570") });
+    }
+    const pagination = normalizeText(doc.querySelector(".page")?.textContent);
+    const pages = pagination.match(/共\s*(\d+)\s*页/);
+    if (pages && Number(pages[1]) > 1) throw new Error("\u67E5\u8BE2\u7ED3\u679C\u5B58\u5728\u591A\u9875\uFF0C\u65E0\u6CD5\u5B89\u5168\u786E\u5B9A\u552F\u4E00\u914D\u7F6E\uFF0C\u8BF7\u5728\u540E\u53F0\u6838\u5B9E");
+    if (matches.length > 1) throw new Error("\u540C\u4E00 SN \u5B58\u5728\u591A\u6761\u914D\u7F6E\uFF0C\u8BF7\u5728\u540E\u53F0\u6838\u5B9E\u540E\u518D\u8BD5");
+    return matches[0] || null;
+  }
+  async function queryDeviceBindConfig(sn) {
+    const html = await requestText(`${ENDPOINT}?method=configList`, {
+      method: "POST",
+      headers: FORM_HEADERS,
+      timeoutMs: 3e4,
+      body: buildFormBody({ updateTimeRange: "", configType: "1", configValue: sn, operator: "", agentClass: "", subAgentClass: "", pageSize: 200 })
+    });
+    return parseDeviceBindConfig(html, sn);
+  }
+  async function createDeviceBindConfig(values) {
+    const response = await requestJson(`${ENDPOINT}?method=config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json;charset=UTF-8" },
+      timeoutMs: 3e4,
+      body: JSON.stringify({ configType: "1", agentClass: "", agentSn: values.sn, maxBindMchCount: "", perDayBindTimes: values.perDayBindTimes, perMonthBindTimes: values.perMonthBindTimes, maxBindCount: "", whiteList: values.whiteList })
+    });
+    if (response?.success !== true) throw new Error(response?.msg || "\u540E\u53F0\u672A\u786E\u8BA4\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E\u65B0\u589E\u6210\u529F");
+  }
+  function assertDeviceBindConfigUpdated(html) {
+    const doc = parsePage(html);
+    const message = normalizeText(doc.body.textContent);
+    if (/失败|错误|异常|无权限/.test(message) || !/操作成功\s*[!！]?/.test(message)) {
+      throw new Error(message.slice(0, 260) || "\u540E\u53F0\u672A\u786E\u8BA4\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E\u4FEE\u6539\u6210\u529F");
+    }
+  }
+  async function updateDeviceBindConfig(record, values) {
+    const html = await requestText(`${ENDPOINT}?method=update`, {
+      method: "POST",
+      headers: FORM_HEADERS,
+      timeoutMs: 3e4,
+      referrer: `${ENDPOINT}?method=update&id=${record.id}`,
+      body: buildFormBody({ id: record.id, maxBindMchCount: record.maxBindMchCount, perDayBindTimes: values.perDayBindTimes, perMonthBindTimes: values.perMonthBindTimes, maxBindCount: record.maxBindCount, whiteList: values.whiteList })
+    });
+    assertDeviceBindConfigUpdated(html);
+  }
+
+  // src/tools/device-bind-config.ts
+  function normalizeDeviceBindConfig(input) {
+    const sn = input.sn.trim();
+    if (!sn) throw new Error("\u8BF7\u8F93\u5165\u4E50\u5237 SN");
+    const count = (raw, label) => {
+      const value = raw?.trim() || "3";
+      if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) throw new Error(`${label}\u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570`);
+      return String(Number(value));
+    };
+    const whiteList = input.whiteList ?? "1";
+    if (whiteList !== "1" && whiteList !== "0") throw new Error("\u8BF7\u9009\u62E9\u662F\u5426\u542F\u7528\u7ED3\u7B97\u4E3B\u4F53\u767D\u540D\u5355");
+    return { sn, perDayBindTimes: count(input.perDayBindTimes, "\u5355\u65E5\u6700\u5927\u7ED1\u5B9A\u6B21\u6570"), perMonthBindTimes: count(input.perMonthBindTimes, "\u5355\u6708\u6700\u5927\u7ED1\u5B9A\u6B21\u6570"), whiteList };
+  }
+  async function saveDeviceBindConfig(input, log) {
+    const values = normalizeDeviceBindConfig(input);
+    log(`\u67E5\u8BE2\u8BBE\u5907 ${values.sn} \u7684\u6362\u7ED1\u914D\u7F6E`);
+    const record = await queryDeviceBindConfig(values.sn);
+    if (record) {
+      log(`\u627E\u5230\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E ${record.id}\uFF0C\u6B63\u5728\u4FEE\u6539`);
+      await updateDeviceBindConfig(record, values);
+    } else {
+      log("\u672A\u627E\u5230\u8BE5 SN \u7684\u914D\u7F6E\uFF0C\u6B63\u5728\u65B0\u589E");
+      await createDeviceBindConfig(values);
+    }
+    log(`\u8BBE\u5907 ${values.sn} \u6362\u7ED1\u914D\u7F6E${record ? "\u4FEE\u6539" : "\u65B0\u589E"}\u6210\u529F`);
+    return record ? "updated" : "created";
+  }
+
   // src/api/device-transfer.ts
-  var ENDPOINT = "/base-business/pinpad/newTerminal.do";
+  var ENDPOINT2 = "/base-business/pinpad/newTerminal.do";
+  var LHSD_TRANSFER_ENDPOINT = "/uts_platform/machine/manager/machineChangeAgent.do";
   function trim(value) {
     return value.trim();
   }
@@ -1304,7 +1404,7 @@
   }
   async function request(method, values, fetchImpl) {
     const body = new URLSearchParams(values);
-    const url = `${ORIGIN}${ENDPOINT}?method=${encodeURIComponent(method)}`;
+    const url = `${ORIGIN}${ENDPOINT2}?method=${encodeURIComponent(method)}`;
     if (!fetchImpl) {
       const payload = await requestJson(url, {
         method: "POST",
@@ -1381,14 +1481,70 @@
     await wait(500);
     await request("changeAgent", requestValues, fetchImpl);
   }
+  function validateLhsdDeviceTransfer(values) {
+    const normalized = {
+      sn: trim(values.sn),
+      oldAgentId: trim(values.oldAgentId),
+      newAgentId: trim(values.newAgentId)
+    };
+    if (!normalized.sn) throw new Error("\u8BF7\u8F93\u5165 SN");
+    if (!/^\d+$/.test(normalized.oldAgentId)) throw new Error("\u65E7\u4EE3\u7406\u5546\u7F16\u53F7\u4E0D\u80FD\u4E3A\u7A7A\uFF0C\u4E14\u5FC5\u987B\u4E3A\u6570\u5B57");
+    if (!/^\d+$/.test(normalized.newAgentId)) throw new Error("\u65B0\u4EE3\u7406\u5546\u7F16\u53F7\u4E0D\u80FD\u4E3A\u7A7A\uFF0C\u4E14\u5FC5\u987B\u4E3A\u6570\u5B57");
+    if (normalized.oldAgentId === normalized.newAgentId) throw new Error("\u65B0\u65E7\u4EE3\u7406\u5546\u7F16\u53F7\u4E0D\u80FD\u76F8\u540C");
+    return normalized;
+  }
+  function parseLhsdDeviceTransferResult(payload) {
+    const success = String(payload.error_code) === "0" || payload.success === true && payload.fail !== true;
+    if (!success) throw new Error(payload.error_msg || "\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8\u5931\u8D25");
+    return {
+      count: Number(payload.count || 0),
+      message: payload.error_msg || "\u5212\u62E8\u6210\u529F"
+    };
+  }
+  async function submitLhsdDeviceTransfer(values, fetchImpl) {
+    const normalized = validateLhsdDeviceTransfer(values);
+    const body = new URLSearchParams({
+      sn: normalized.sn,
+      oldAgentId: normalized.oldAgentId,
+      newAgentId: normalized.newAgentId
+    });
+    const url = `${ORIGIN}${LHSD_TRANSFER_ENDPOINT}`;
+    if (!fetchImpl) {
+      const payload = await requestJson(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+        body
+      });
+      return parseLhsdDeviceTransferResult(payload);
+    }
+    const response = await fetchImpl(url, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: "application/json, text/javascript, */*; q=0.01",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      body
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`\u8BF7\u6C42\u5931\u8D25 ${response.status}: ${text.slice(0, 200)}`);
+    try {
+      return parseLhsdDeviceTransferResult(JSON.parse(text));
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new Error(`\u63A5\u53E3\u8FD4\u56DE\u975E JSON \u5185\u5BB9: ${text.slice(0, 200)}`);
+      throw error;
+    }
+  }
 
   // src/tools/device-transfer.ts
   var queryOldDeviceAgent2 = (sn) => queryOldDeviceAgent(sn);
   var queryNewDeviceAgent2 = (sn, oldAgentId, newAgentId) => queryNewDeviceAgent(sn, oldAgentId, newAgentId);
   var submitDeviceTransfer2 = (values, onStep) => submitDeviceTransfer(values, onStep);
+  var submitLhsdDeviceTransfer2 = (values) => submitLhsdDeviceTransfer(values);
 
   // src/content/index.ts
-  var VERSION = "1.0.3";
+  var VERSION = "1.0.5";
   var OPERATIONS_ORIGIN = "https://om.leshuazf.com";
   var CUSTOMER_SERVICE_ORIGIN = "https://h5.leshuazf.com";
   var FLOAT_TOP_STORAGE_KEY = "syt-extension-float-top";
@@ -1449,10 +1605,17 @@
           <div class="shared-tool-actions"><button id="syt-run-key" type="button">\u914D\u7F6E\u5546\u6237 key</button></div>
           <div id="syt-reset-status" class="status"></div>
           <div class="section-title">\u672C\u6B21\u91CD\u7F6E\u7ED3\u679C</div><div class="result-table-wrap"><table><thead><tr><th>\u4E50\u5237\u5546\u6237\u53F7</th><th>\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7</th><th>\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7</th><th>\u65B9\u5F0F</th></tr></thead><tbody id="syt-results"><tr><td colspan="4" class="empty">\u6267\u884C\u540E\u663E\u793A\u7ED3\u679C</td></tr></tbody></table></div>
-          <div class="actions"><button id="syt-copy" type="button" disabled>\u590D\u5236\u7ED3\u679C</button><button class="nav-tool" data-view="code" type="button">\u7801\u724C\u5212\u8F6C</button><button class="nav-tool" data-view="device" type="button">\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8</button><button class="nav-tool" data-view="whitelist" type="button">\u9632\u5207\u6237\u767D\u540D\u5355</button></div>
+          <div class="actions"><button id="syt-copy" type="button" disabled>\u590D\u5236\u7ED3\u679C</button><button class="nav-tool" data-view="code" type="button">\u7801\u724C\u5212\u8F6C</button><div class="device-tool-actions"><button class="nav-tool" data-view="device" type="button">\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8</button><button class="nav-tool" data-view="lhsd-device" type="button">\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8</button></div><button class="nav-tool" data-view="whitelist" type="button">\u9632\u5207\u6237\u767D\u540D\u5355</button><button class="nav-tool" data-view="bind-config" type="button">\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E</button></div>
+        </section>
+        <section id="syt-view-bind-config" class="view">
+          <label>\u4E50\u5237 SN\uFF08\u5FC5\u586B\uFF09<input id="syt-bind-config-sn" autocomplete="off" required></label>
+          <div class="form-row"><label>\u5355\u65E5\u6700\u5927\u7ED1\u5B9A\u6B21\u6570<input id="syt-bind-config-day" type="number" min="0" step="1" value="3" placeholder="3"></label><label>\u5355\u6708\u6700\u5927\u7ED1\u5B9A\u6B21\u6570<input id="syt-bind-config-month" type="number" min="0" step="1" value="3" placeholder="3"></label></div>
+          <fieldset class="business-line"><legend>\u7ED3\u7B97\u4E3B\u4F53\u767D\u540D\u5355</legend><label><input type="radio" name="syt-bind-config-whitelist" value="1" checked>\u662F</label><label><input type="radio" name="syt-bind-config-whitelist" value="0">\u5426</label></fieldset>
+          <button id="syt-run-bind-config" class="primary" type="button">\u786E\u8BA4\u914D\u7F6E</button><div id="syt-bind-config-status" class="status" role="status"></div>
         </section>
         <section id="syt-view-code" class="view"><div class="form-row"><label>\u7801\u724C\u5F00\u59CB\u7F16\u53F7<input id="syt-code-start" autocomplete="off"></label><label>\u7801\u724C\u7ED3\u675F\u7F16\u53F7<input id="syt-code-end" autocomplete="off"></label></div><div class="form-row"><label>\u539F\u4EE3\u7406\u5546<input id="syt-code-source" autocomplete="off"></label><label>\u65B0\u4EE3\u7406\u5546<input id="syt-code-target" autocomplete="off"></label></div><button id="syt-run-code" class="primary" type="button">\u786E\u8BA4\u5212\u8F6C</button><div id="syt-code-status" class="status"></div></section>
         <section id="syt-view-device" class="view"><div class="section-title">\u673A\u5177\u4FE1\u606F</div><div class="form-row"><label>\u4E50\u5237 SN \u59CB<input id="syt-device-sn" autocomplete="off"></label><label>\u6570\u91CF<input id="syt-device-quantity" value="1" readonly></label></div><button id="syt-device-query-old" type="button">\u67E5\u8BE2\u65E7\u4EE3\u7406\u5546</button><div class="section-title">\u65E7\u4EE3\u7406\u5546</div><label>\u65E7\u4EE3\u7406\u5546\u7F16\u53F7<input id="syt-device-old-id" readonly></label><label>\u65E7\u4EE3\u7406\u5546\u540D\u79F0<input id="syt-device-old-name" readonly></label><label>\u65E7\u4EE3\u7406\u5546\u7C7B\u578B<input id="syt-device-old-type" readonly></label><div class="section-title">\u65B0\u4EE3\u7406\u5546</div><label>\u65B0\u4EE3\u7406\u5546\u7F16\u53F7<input id="syt-device-new-id" autocomplete="off"></label><label>\u65B0\u4EE3\u7406\u5546\u540D\u79F0<input id="syt-device-new-name" readonly></label><label>\u65B0\u4EE3\u7406\u5546\u7C7B\u578B<input id="syt-device-new-type" readonly></label><button id="syt-run-device" class="primary" type="button">\u786E\u8BA4\u5212\u62E8</button><div id="syt-device-status" class="status"></div></section>
+        <section id="syt-view-lhsd-device" class="view"><label>SN<input id="syt-lhsd-device-sn" autocomplete="off"></label><label>\u65E7\u4EE3\u7406\u5546\u7F16\u53F7<input id="syt-lhsd-device-old-id" autocomplete="off"></label><label>\u65B0\u4EE3\u7406\u5546\u7F16\u53F7<input id="syt-lhsd-device-new-id" autocomplete="off"></label><button id="syt-run-lhsd-device" class="primary" type="button">\u786E\u8BA4\u5212\u62E8</button><div id="syt-lhsd-device-status" class="status"></div></section>
         <section id="syt-view-whitelist" class="view"><div class="form-row"><label>\u624B\u673A\u53F7<input id="syt-white-mobile" autocomplete="off"></label><label>\u8EAB\u4EFD\u8BC1\u53F7<input id="syt-white-id" autocomplete="off"></label></div><div class="form-row"><label>\u8425\u4E1A\u6267\u7167\u53F7<input id="syt-white-license" autocomplete="off"></label><label>\u7ED3\u7B97\u8D26\u53F7<input id="syt-white-account" autocomplete="off"></label></div><button id="syt-run-whitelist" class="primary" type="button">\u6DFB\u52A0\u9632\u5207\u6237\u767D\u540D\u5355</button><div id="syt-white-status" class="status"></div></section>
         <section class="log"><div class="log-actions"><button id="syt-log-toggle" type="button">\u5C55\u5F00\u65E5\u5FD7</button><button id="syt-log-clear" type="button">\u6E05\u7A7A\u65E5\u5FD7</button></div><div id="syt-log-preview">\u7B49\u5F85\u6267\u884C</div><pre id="syt-log-full"></pre></section>
       </main>
@@ -1576,7 +1739,7 @@
     const showView = (name) => {
       root.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === `syt-view-${name}`));
       backButton.classList.toggle("visible", name !== "reset");
-      title.textContent = `${name === "reset" ? "\u8FD0\u8425\u5DE5\u5177" : { code: "\u7801\u724C\u5212\u8F6C", device: "\u673A\u5177\u5212\u62E8", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name]} v${VERSION}`;
+      title.textContent = `${name === "reset" ? "\u8FD0\u8425\u5DE5\u5177" : { code: "\u7801\u724C\u5212\u8F6C", device: "\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8", "lhsd-device": "\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8", "bind-config": "\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name]} v${VERSION}`;
     };
     const applyPreset = () => {
       const option = PRESETS[Number(preset.value)] || PRESETS[0];
@@ -1832,6 +1995,61 @@
         log(`\u673A\u5177\u5212\u62E8\u5931\u8D25: ${message}`, true);
       } finally {
         setDeviceBusy(false);
+      }
+    });
+    const lhsdDeviceSubmit = byId(root, "syt-run-lhsd-device");
+    const lhsdDeviceStatus = byId(root, "syt-lhsd-device-status");
+    lhsdDeviceSubmit.addEventListener("click", async () => {
+      if (lhsdDeviceSubmit.disabled) return;
+      const values = {
+        sn: byId(root, "syt-lhsd-device-sn").value.trim(),
+        oldAgentId: byId(root, "syt-lhsd-device-old-id").value.trim(),
+        newAgentId: byId(root, "syt-lhsd-device-new-id").value.trim()
+      };
+      lhsdDeviceSubmit.disabled = true;
+      try {
+        setStatus(lhsdDeviceStatus, "\u6B63\u5728\u53D1\u8D77\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8...");
+        const result = await submitLhsdDeviceTransfer2(values);
+        const countText = result.count > 0 ? `\uFF0C\u5904\u7406\u6570\u91CF ${result.count}` : "";
+        setStatus(lhsdDeviceStatus, `\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8\u6210\u529F${countText}`);
+        log(`\u8054\u5408\u6536\u5355\u673A\u5177 ${values.sn} \u5212\u62E8\u6210\u529F: ${values.oldAgentId} -> ${values.newAgentId}${countText}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setStatus(lhsdDeviceStatus, `\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8\u5931\u8D25: ${message}`, true);
+        log(`\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8\u5931\u8D25: ${message}`, true);
+      } finally {
+        lhsdDeviceSubmit.disabled = false;
+      }
+    });
+    const bindConfigView = byId(root, "syt-view-bind-config");
+    const bindConfigSubmit = byId(root, "syt-run-bind-config");
+    bindConfigSubmit.addEventListener("click", async () => {
+      if (bindConfigSubmit.disabled) return;
+      const status = byId(root, "syt-bind-config-status");
+      const values = {
+        sn: byId(root, "syt-bind-config-sn").value,
+        perDayBindTimes: byId(root, "syt-bind-config-day").value,
+        perMonthBindTimes: byId(root, "syt-bind-config-month").value,
+        whiteList: bindConfigView.querySelector('input[name="syt-bind-config-whitelist"]:checked')?.value
+      };
+      const controls = bindConfigView.querySelectorAll("input, button");
+      controls.forEach((control) => {
+        control.disabled = true;
+      });
+      bindConfigSubmit.textContent = "\u5904\u7406\u4E2D...";
+      try {
+        setStatus(status, "\u6B63\u5728\u67E5\u8BE2\u5E76\u4FDD\u5B58\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E...");
+        const action = await saveDeviceBindConfig(values, log);
+        setStatus(status, `\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E${action === "created" ? "\u65B0\u589E" : "\u4FEE\u6539"}\u6210\u529F`);
+      } catch (error) {
+        const message = `\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E\u5931\u8D25: ${error instanceof Error ? error.message : String(error)}`;
+        setStatus(status, message, true);
+        log(message, true);
+      } finally {
+        controls.forEach((control) => {
+          control.disabled = false;
+        });
+        bindConfigSubmit.textContent = "\u786E\u8BA4\u914D\u7F6E";
       }
     });
     byId(root, "syt-run-whitelist").addEventListener("click", async () => {
