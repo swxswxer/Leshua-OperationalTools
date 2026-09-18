@@ -11,6 +11,9 @@
 #syt-extension-root .view { display: none; }
 #syt-extension-root .view.active { display: block; }
 #syt-extension-root label { display: block; margin: 8px 0; color: #374151; font-weight: 700; }
+#syt-extension-root .field-help { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-left: 6px; border: 1px solid #64748b; border-radius: 50%; color: #475569; font-size: 11px; font-weight: 400; cursor: help; vertical-align: middle; }
+#syt-extension-root .field-help-tooltip { display: none; position: absolute; z-index: 2; top: calc(100% + 6px); left: -100px; width: 250px; max-width: calc(100vw - 48px); padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 4px; color: #1f2937; background: #fff; box-shadow: 0 3px 10px rgba(0,0,0,.15); font-size: 12px; line-height: 1.6; white-space: normal; }
+#syt-extension-root .field-help:hover .field-help-tooltip, #syt-extension-root .field-help:focus .field-help-tooltip { display: block; }
 #syt-extension-root input, #syt-extension-root select { width: 100%; height: 31px; margin-top: 4px; padding: 4px 8px; color: #111827; background: #fff; border: 1px solid #cbd5e1; border-radius: 0; font: inherit; font-weight: 400; }
 #syt-extension-root button { min-height: 31px; padding: 4px 10px; color: #1d4ed8; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 0; cursor: pointer; font: inherit; }
 #syt-extension-root button:disabled { color: #6b7280; background: #f3f4f6; border-color: #d1d5db; cursor: not-allowed; }

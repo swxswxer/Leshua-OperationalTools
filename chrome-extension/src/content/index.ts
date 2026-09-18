@@ -91,7 +91,7 @@ function createPanel(): void {
           <div class="actions"><button id="syt-copy" type="button" disabled>复制结果</button><button class="nav-tool" data-view="code" type="button">码牌划转</button><div class="device-tool-actions"><button class="nav-tool" data-view="device" type="button">收银通机具划拨</button><button class="nav-tool" data-view="lhsd-device" type="button">联合收单机具划拨</button></div><button class="nav-tool" data-view="whitelist" type="button">防切户白名单</button><button class="nav-tool" data-view="bind-config" type="button">设备换绑配置</button></div>
         </section>
         <section id="syt-view-bind-config" class="view">
-          <label>乐刷 SN（必填）<input id="syt-bind-config-sn" autocomplete="off" required></label>
+          <label>乐刷 SN（必填）<span class="field-help" tabindex="0" aria-label="设备换绑配置说明" aria-describedby="syt-bind-config-help">?<span id="syt-bind-config-help" class="field-help-tooltip" role="tooltip">点击确认配置后，先按乐刷 SN 查询已有配置：有记录则修改该记录，没有记录则新增配置。查询失败时不会继续提交。</span></span><input id="syt-bind-config-sn" autocomplete="off" required></label>
           <div class="form-row"><label>单日最大绑定次数<input id="syt-bind-config-day" type="number" min="0" step="1" value="3" placeholder="3"></label><label>单月最大绑定次数<input id="syt-bind-config-month" type="number" min="0" step="1" value="3" placeholder="3"></label></div>
           <fieldset class="business-line"><legend>结算主体白名单</legend><label><input type="radio" name="syt-bind-config-whitelist" value="1" checked>是</label><label><input type="radio" name="syt-bind-config-whitelist" value="0">否</label></fieldset>
           <button id="syt-run-bind-config" class="primary" type="button">确认配置</button><div id="syt-bind-config-status" class="status" role="status"></div>
