@@ -22,12 +22,7 @@ import {
   type LhsdDeviceTransferValues,
 } from '../tools/device-transfer';
 
-const VERSION = '1.0.5';
-const OPERATIONS_ORIGIN = 'https://om.leshuazf.com';
-const CUSTOMER_SERVICE_ORIGIN = 'https://h5.leshuazf.com';
-const FLOAT_TOP_STORAGE_KEY = 'syt-extension-float-top';
-const FLOAT_SIZE = 54;
-const FLOAT_VIEWPORT_GAP = 8;
+const VERSION = chrome.runtime.getManifest().version;
 const PRESETS = [
   { name: '无', channelId: '', channelName: '', subAppids: '', jsapiPaths: '' },
   { name: '自定义', channelId: '', channelName: '', subAppids: '', jsapiPaths: '' },
@@ -72,11 +67,9 @@ function createPanel(): void {
 
   const root = document.createElement('div');
   root.id = 'syt-extension-root';
-  root.className = 'collapsed';
   root.innerHTML = `
-    <button id="syt-extension-float" class="float-ball" type="button" title="打开运营工具">运营工具</button>
     <section class="panel" aria-label="运营工具">
-      <header><div><button id="syt-back" class="icon-button" type="button" title="返回">←</button><span id="syt-title">运营工具 v${VERSION}</span></div><button id="syt-close" class="icon-button" type="button" title="收起">×</button></header>
+      <header><div><button id="syt-back" class="icon-button" type="button" title="返回">←</button><span id="syt-title">运营工具 v${VERSION}</span></div></header>
       <main>
         <section id="syt-view-reset" class="view active">
           <label>乐刷商户号<input id="syt-merchant-ids" placeholder="重置最多 5 个；配置 key 不限，以 ; 分隔" autocomplete="off"></label>
@@ -105,8 +98,6 @@ function createPanel(): void {
     </section>`;
   document.body.append(root);
 
-  const floatBall = byId<HTMLButtonElement>(root, 'syt-extension-float');
-  const closeButton = byId<HTMLButtonElement>(root, 'syt-close');
   const backButton = byId<HTMLButtonElement>(root, 'syt-back');
   const title = byId<HTMLElement>(root, 'syt-title');
   const resetInput = byId<HTMLInputElement>(root, 'syt-merchant-ids');
@@ -132,19 +123,6 @@ function createPanel(): void {
   const logClear = byId<HTMLButtonElement>(root, 'syt-log-clear');
   let latestResults: MerchantReportResult[] = [];
   let busy = false;
-
-  const clampFloatTop = (top: number): number => Math.min(
-    Math.max(FLOAT_VIEWPORT_GAP, top),
-    Math.max(FLOAT_VIEWPORT_GAP, window.innerHeight - FLOAT_SIZE - FLOAT_VIEWPORT_GAP),
-  );
-  const setFloatTop = (top: number) => {
-    root.style.top = `${clampFloatTop(top)}px`;
-  };
-  const restoreFloatTop = async () => {
-    const { [FLOAT_TOP_STORAGE_KEY]: storedTop } = await chrome.storage.local.get(FLOAT_TOP_STORAGE_KEY);
-    setFloatTop(typeof storedTop === 'number' ? storedTop : window.innerHeight - FLOAT_SIZE - 18);
-  };
-  void restoreFloatTop();
 
   const log: LogHandler = (message, isError = false) => {
     const line = `[${new Date().toLocaleString('zh-CN', { hour12: false })}] ${message}`;
@@ -233,48 +211,10 @@ function createPanel(): void {
     channelOptions.classList.toggle('hidden', option.name === '无');
   };
 
-  let dragStartY = 0;
-  let dragStartTop = 0;
-  let isDragging = false;
-  let didDrag = false;
-  floatBall.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
-    isDragging = true;
-    didDrag = false;
-    dragStartY = event.clientY;
-    dragStartTop = root.getBoundingClientRect().top;
-    floatBall.setPointerCapture(event.pointerId);
-    floatBall.classList.add('dragging');
-    event.preventDefault();
-  });
-  floatBall.addEventListener('pointermove', (event) => {
-    if (!isDragging) return;
-    const distance = event.clientY - dragStartY;
-    if (Math.abs(distance) > 3) didDrag = true;
-    setFloatTop(dragStartTop + distance);
-  });
-  const finishDrag = async (event: PointerEvent) => {
-    if (!isDragging) return;
-    isDragging = false;
-    floatBall.classList.remove('dragging');
-    if (floatBall.hasPointerCapture(event.pointerId)) floatBall.releasePointerCapture(event.pointerId);
-    await chrome.storage.local.set({ [FLOAT_TOP_STORAGE_KEY]: root.getBoundingClientRect().top });
-  };
-  floatBall.addEventListener('pointerup', (event) => { void finishDrag(event); });
-  floatBall.addEventListener('pointercancel', (event) => { void finishDrag(event); });
-  floatBall.addEventListener('click', () => {
-    if (didDrag) {
-      didDrag = false;
-      return;
-    }
-    root.classList.remove('collapsed');
-  });
   resetInput.addEventListener('dblclick', () => {
     resetInput.value = '';
     resetInput.focus();
   });
-  window.addEventListener('resize', () => setFloatTop(root.getBoundingClientRect().top));
-  closeButton.addEventListener('click', () => root.classList.add('collapsed'));
   backButton.addEventListener('click', () => showView('reset'));
   preset.addEventListener('change', applyPreset);
   root.querySelectorAll<HTMLButtonElement>('.nav-tool').forEach((button) => button.addEventListener('click', () => showView(button.dataset.view || 'reset')));
@@ -527,28 +467,7 @@ function createPanel(): void {
     const values: WhitelistValues = { mobile: byId<HTMLInputElement>(root, 'syt-white-mobile').value.trim(), idCard: byId<HTMLInputElement>(root, 'syt-white-id').value.trim(), businessLicense: byId<HTMLInputElement>(root, 'syt-white-license').value.trim(), settlementAccount: byId<HTMLInputElement>(root, 'syt-white-account').value.trim() };
     try { setStatus(status, '处理中...'); await addChangeWhitelist(values, log, (_state, message) => setStatus(status, message)); setStatus(status, '防切户白名单添加完成'); } catch (error) { setStatus(status, error instanceof Error ? error.message : String(error), true); }
   });
-  document.addEventListener('click', (event) => {
-    if (!root.classList.contains('collapsed') && !root.contains(event.target as Node)) root.classList.add('collapsed');
-  });
   applyPreset();
 }
 
-function isSupportedPage(): boolean {
-  if (window.location.origin === OPERATIONS_ORIGIN) return true;
-  return window.location.origin === CUSTOMER_SERVICE_ORIGIN
-    && window.location.pathname.startsWith('/wap/customer-service/')
-    && window.location.hash.startsWith('#/Online');
-}
-
-function syncPanel(): void {
-  if (window.top !== window.self) return;
-  const panel = document.getElementById('syt-extension-root');
-  if (!isSupportedPage()) {
-    panel?.remove();
-    return;
-  }
-  if (!panel) createPanel();
-}
-
-window.addEventListener('hashchange', syncPanel);
-syncPanel();
+createPanel();

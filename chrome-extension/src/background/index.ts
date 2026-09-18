@@ -8,6 +8,9 @@ import type {
 
 const OPERATIONS_ORIGIN = 'https://om.leshuazf.com';
 
+void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
+  .catch((error) => console.error('无法启用运营工具侧边栏', error));
+
 function assertAllowedUrl(url: string): string {
   const resolved = new URL(url);
   if (resolved.origin !== OPERATIONS_ORIGIN) throw new Error(`不允许代理请求 ${resolved.origin}`);

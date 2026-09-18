@@ -2,6 +2,7 @@
 (() => {
   // src/background/index.ts
   var OPERATIONS_ORIGIN = "https://om.leshuazf.com";
+  void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((error) => console.error("\u65E0\u6CD5\u542F\u7528\u8FD0\u8425\u5DE5\u5177\u4FA7\u8FB9\u680F", error));
   function assertAllowedUrl(url) {
     const resolved = new URL(url);
     if (resolved.origin !== OPERATIONS_ORIGIN) throw new Error(`\u4E0D\u5141\u8BB8\u4EE3\u7406\u8BF7\u6C42 ${resolved.origin}`);

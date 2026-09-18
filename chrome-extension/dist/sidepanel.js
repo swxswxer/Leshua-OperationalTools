@@ -248,7 +248,7 @@
     }
   }
 
-  // src/content/helpers.ts
+  // src/sidepanel/helpers.ts
   function channelText(result) {
     if (result.state === "success") return `${result.subMchId}${result.note ? `\uFF08${result.note}\uFF09` : ""}`;
     if (result.state === "pending") return "\u5904\u7406\u4E2D";
@@ -1543,13 +1543,8 @@
   var submitDeviceTransfer2 = (values, onStep) => submitDeviceTransfer(values, onStep);
   var submitLhsdDeviceTransfer2 = (values) => submitLhsdDeviceTransfer(values);
 
-  // src/content/index.ts
-  var VERSION = "1.0.5";
-  var OPERATIONS_ORIGIN = "https://om.leshuazf.com";
-  var CUSTOMER_SERVICE_ORIGIN = "https://h5.leshuazf.com";
-  var FLOAT_TOP_STORAGE_KEY = "syt-extension-float-top";
-  var FLOAT_SIZE = 54;
-  var FLOAT_VIEWPORT_GAP = 8;
+  // src/sidepanel/index.ts
+  var VERSION = chrome.runtime.getManifest().version;
   var PRESETS = [
     { name: "\u65E0", channelId: "", channelName: "", subAppids: "", jsapiPaths: "" },
     { name: "\u81EA\u5B9A\u4E49", channelId: "", channelName: "", subAppids: "", jsapiPaths: "" },
@@ -1589,11 +1584,9 @@
     document.getElementById("syt-extension-root")?.remove();
     const root = document.createElement("div");
     root.id = "syt-extension-root";
-    root.className = "collapsed";
     root.innerHTML = `
-    <button id="syt-extension-float" class="float-ball" type="button" title="\u6253\u5F00\u8FD0\u8425\u5DE5\u5177">\u8FD0\u8425\u5DE5\u5177</button>
     <section class="panel" aria-label="\u8FD0\u8425\u5DE5\u5177">
-      <header><div><button id="syt-back" class="icon-button" type="button" title="\u8FD4\u56DE">\u2190</button><span id="syt-title">\u8FD0\u8425\u5DE5\u5177 v${VERSION}</span></div><button id="syt-close" class="icon-button" type="button" title="\u6536\u8D77">\xD7</button></header>
+      <header><div><button id="syt-back" class="icon-button" type="button" title="\u8FD4\u56DE">\u2190</button><span id="syt-title">\u8FD0\u8425\u5DE5\u5177 v${VERSION}</span></div></header>
       <main>
         <section id="syt-view-reset" class="view active">
           <label>\u4E50\u5237\u5546\u6237\u53F7<input id="syt-merchant-ids" placeholder="\u91CD\u7F6E\u6700\u591A 5 \u4E2A\uFF1B\u914D\u7F6E key \u4E0D\u9650\uFF0C\u4EE5 ; \u5206\u9694" autocomplete="off"></label>
@@ -1621,8 +1614,6 @@
       </main>
     </section>`;
     document.body.append(root);
-    const floatBall = byId(root, "syt-extension-float");
-    const closeButton = byId(root, "syt-close");
     const backButton = byId(root, "syt-back");
     const title = byId(root, "syt-title");
     const resetInput = byId(root, "syt-merchant-ids");
@@ -1648,18 +1639,6 @@
     const logClear = byId(root, "syt-log-clear");
     let latestResults = [];
     let busy = false;
-    const clampFloatTop = (top) => Math.min(
-      Math.max(FLOAT_VIEWPORT_GAP, top),
-      Math.max(FLOAT_VIEWPORT_GAP, window.innerHeight - FLOAT_SIZE - FLOAT_VIEWPORT_GAP)
-    );
-    const setFloatTop = (top) => {
-      root.style.top = `${clampFloatTop(top)}px`;
-    };
-    const restoreFloatTop = async () => {
-      const { [FLOAT_TOP_STORAGE_KEY]: storedTop } = await chrome.storage.local.get(FLOAT_TOP_STORAGE_KEY);
-      setFloatTop(typeof storedTop === "number" ? storedTop : window.innerHeight - FLOAT_SIZE - 18);
-    };
-    void restoreFloatTop();
     const log = (message, isError = false) => {
       const line = `[${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN", { hour12: false })}] ${message}`;
       const row = document.createElement("div");
@@ -1749,52 +1728,10 @@
       jsapiPaths.value = option.jsapiPaths;
       channelOptions.classList.toggle("hidden", option.name === "\u65E0");
     };
-    let dragStartY = 0;
-    let dragStartTop = 0;
-    let isDragging = false;
-    let didDrag = false;
-    floatBall.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) return;
-      isDragging = true;
-      didDrag = false;
-      dragStartY = event.clientY;
-      dragStartTop = root.getBoundingClientRect().top;
-      floatBall.setPointerCapture(event.pointerId);
-      floatBall.classList.add("dragging");
-      event.preventDefault();
-    });
-    floatBall.addEventListener("pointermove", (event) => {
-      if (!isDragging) return;
-      const distance = event.clientY - dragStartY;
-      if (Math.abs(distance) > 3) didDrag = true;
-      setFloatTop(dragStartTop + distance);
-    });
-    const finishDrag = async (event) => {
-      if (!isDragging) return;
-      isDragging = false;
-      floatBall.classList.remove("dragging");
-      if (floatBall.hasPointerCapture(event.pointerId)) floatBall.releasePointerCapture(event.pointerId);
-      await chrome.storage.local.set({ [FLOAT_TOP_STORAGE_KEY]: root.getBoundingClientRect().top });
-    };
-    floatBall.addEventListener("pointerup", (event) => {
-      void finishDrag(event);
-    });
-    floatBall.addEventListener("pointercancel", (event) => {
-      void finishDrag(event);
-    });
-    floatBall.addEventListener("click", () => {
-      if (didDrag) {
-        didDrag = false;
-        return;
-      }
-      root.classList.remove("collapsed");
-    });
     resetInput.addEventListener("dblclick", () => {
       resetInput.value = "";
       resetInput.focus();
     });
-    window.addEventListener("resize", () => setFloatTop(root.getBoundingClientRect().top));
-    closeButton.addEventListener("click", () => root.classList.add("collapsed"));
     backButton.addEventListener("click", () => showView("reset"));
     preset.addEventListener("change", applyPreset);
     root.querySelectorAll(".nav-tool").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view || "reset")));
@@ -2063,24 +2000,7 @@
         setStatus(status, error instanceof Error ? error.message : String(error), true);
       }
     });
-    document.addEventListener("click", (event) => {
-      if (!root.classList.contains("collapsed") && !root.contains(event.target)) root.classList.add("collapsed");
-    });
     applyPreset();
   }
-  function isSupportedPage() {
-    if (window.location.origin === OPERATIONS_ORIGIN) return true;
-    return window.location.origin === CUSTOMER_SERVICE_ORIGIN && window.location.pathname.startsWith("/wap/customer-service/") && window.location.hash.startsWith("#/Online");
-  }
-  function syncPanel() {
-    if (window.top !== window.self) return;
-    const panel = document.getElementById("syt-extension-root");
-    if (!isSupportedPage()) {
-      panel?.remove();
-      return;
-    }
-    if (!panel) createPanel();
-  }
-  window.addEventListener("hashchange", syncPanel);
-  syncPanel();
+  createPanel();
 })();

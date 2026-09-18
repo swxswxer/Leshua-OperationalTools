@@ -8,7 +8,7 @@ await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 await build({
   entryPoints: {
-    content: new URL('./src/content/index.ts', root).pathname,
+    sidepanel: new URL('./src/sidepanel/index.ts', root).pathname,
     background: new URL('./src/background/index.ts', root).pathname,
   },
   bundle: true,
@@ -18,7 +18,8 @@ await build({
   sourcemap: false,
   legalComments: 'none',
 });
-await cp(new URL('./src/styles/content.css', root), new URL('./content.css', dist));
+await cp(new URL('./src/styles/sidepanel.css', root), new URL('./sidepanel.css', dist));
+await cp(new URL('./src/sidepanel/index.html', root), new URL('./sidepanel.html', dist));
 await cp(new URL('./manifest.json', root), new URL('./manifest.json', dist));
 
 console.log('构建完成：dist/ 已生成，可在 Chrome 加载该目录。');
