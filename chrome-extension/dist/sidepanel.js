@@ -447,6 +447,35 @@
     }
   }
 
+  // src/sidepanel/display.ts
+  var DISPLAY_SIZE_KEY = "operations-display-size";
+  function resolveDisplaySize(saved, platform) {
+    if (saved === "compact" || saved === "standard" || saved === "large") return saved;
+    return /mac/i.test(platform) ? "compact" : "standard";
+  }
+  function initializeDisplaySize(select, status) {
+    let saved = null;
+    try {
+      saved = localStorage.getItem(DISPLAY_SIZE_KEY);
+    } catch {
+    }
+    const apply = (value) => {
+      document.documentElement.dataset.displaySize = value;
+      select.value = value;
+    };
+    apply(resolveDisplaySize(saved, navigator.platform));
+    select.addEventListener("change", () => {
+      const value = resolveDisplaySize(select.value, navigator.platform);
+      apply(value);
+      try {
+        localStorage.setItem(DISPLAY_SIZE_KEY, value);
+        status.textContent = "";
+      } catch {
+        status.textContent = "\u663E\u793A\u5927\u5C0F\u5DF2\u8C03\u6574\uFF0C\u4F46\u65E0\u6CD5\u4FDD\u5B58\uFF0C\u4E0B\u6B21\u6253\u5F00\u65F6\u5C06\u6062\u590D\u9ED8\u8BA4\u3002";
+      }
+    });
+  }
+
   // src/api/payment-config.ts
   function createdAt(value) {
     return new Date(String(value || "").replace(/\.0$/, "").replace(" ", "T")).getTime() || 0;
@@ -1739,7 +1768,8 @@
     root.id = "syt-extension-root";
     root.innerHTML = `
     <section class="panel" aria-label="\u8FD0\u8425\u5DE5\u5177">
-      <header class="app-header"><span class="brand">${icon("wrench")}\u8FD0\u8425\u5DE5\u5177</span><span class="version">v${VERSION}</span></header>
+      <header class="app-header"><span class="brand">${icon("wrench")}\u8FD0\u8425\u5DE5\u5177</span><div class="header-settings"><label class="sr-only" for="syt-display-size">\u663E\u793A\u5927\u5C0F</label><select id="syt-display-size" title="\u663E\u793A\u5927\u5C0F"><option value="compact">\u7D27\u51D1</option><option value="standard">\u6807\u51C6</option><option value="large">\u5927\u5B57</option></select><span class="version">v${VERSION}</span></div></header>
+      <div id="syt-display-status" class="display-status" role="status"></div>
       <main>
         <div class="tool-heading"><div><button id="syt-back" class="icon-button" type="button" title="\u8FD4\u56DE\u91CD\u7F6E\u9875\u9762" aria-label="\u8FD4\u56DE\u91CD\u7F6E\u9875\u9762">${icon("back")}</button><h1 id="syt-title">\u5B50\u5546\u6237\u53F7\u91CD\u7F6E</h1></div><select id="syt-tool-select" aria-label="\u5207\u6362\u5DE5\u5177"><option value="" disabled selected>\u5207\u6362\u5DE5\u5177</option><option value="reset">\u5B50\u5546\u6237\u53F7\u91CD\u7F6E</option><option value="code">\u7801\u724C\u5212\u8F6C</option><option value="device">\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8</option><option value="lhsd-device">\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8</option><option value="whitelist">\u9632\u5207\u6237\u767D\u540D\u5355</option><option value="bind-config">\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E</option></select></div>
         <section id="syt-view-reset" class="view active">
@@ -1769,6 +1799,7 @@
       </main>
     </section>`;
     document.body.append(root);
+    initializeDisplaySize(byId(root, "syt-display-size"), byId(root, "syt-display-status"));
     const backButton = byId(root, "syt-back");
     const title = byId(root, "syt-title");
     const resetInput = byId(root, "syt-merchant-ids");

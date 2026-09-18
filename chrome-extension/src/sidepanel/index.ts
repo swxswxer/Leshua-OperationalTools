@@ -8,6 +8,7 @@ import type { CodePlateValues, LogHandler, ReportOptions, WhitelistValues } from
 import { copyText, hasCustomChannel, validateChannels } from './helpers';
 import { icon, setButtonLabel } from './icons';
 import { copyResultText, renderResultList } from './results';
+import { initializeDisplaySize } from './display';
 import { runBatchReset } from '../tools/batch-reset';
 import { runCustomChannelReset } from '../tools/custom-channel-reset';
 import { configureMerchantKeys, parseMerchantKeyIds } from '../tools/merchant-key';
@@ -61,7 +62,8 @@ function createPanel(): void {
   root.id = 'syt-extension-root';
   root.innerHTML = `
     <section class="panel" aria-label="运营工具">
-      <header class="app-header"><span class="brand">${icon('wrench')}运营工具</span><span class="version">v${VERSION}</span></header>
+      <header class="app-header"><span class="brand">${icon('wrench')}运营工具</span><div class="header-settings"><label class="sr-only" for="syt-display-size">显示大小</label><select id="syt-display-size" title="显示大小"><option value="compact">紧凑</option><option value="standard">标准</option><option value="large">大字</option></select><span class="version">v${VERSION}</span></div></header>
+      <div id="syt-display-status" class="display-status" role="status"></div>
       <main>
         <div class="tool-heading"><div><button id="syt-back" class="icon-button" type="button" title="返回重置页面" aria-label="返回重置页面">${icon('back')}</button><h1 id="syt-title">子商户号重置</h1></div><select id="syt-tool-select" aria-label="切换工具"><option value="" disabled selected>切换工具</option><option value="reset">子商户号重置</option><option value="code">码牌划转</option><option value="device">收银通机具划拨</option><option value="lhsd-device">联合收单机具划拨</option><option value="whitelist">防切户白名单</option><option value="bind-config">设备换绑配置</option></select></div>
         <section id="syt-view-reset" class="view active">
@@ -91,6 +93,7 @@ function createPanel(): void {
       </main>
     </section>`;
   document.body.append(root);
+  initializeDisplaySize(byId<HTMLSelectElement>(root, 'syt-display-size'), byId<HTMLElement>(root, 'syt-display-status'));
 
   const backButton = byId<HTMLButtonElement>(root, 'syt-back');
   const title = byId<HTMLElement>(root, 'syt-title');
