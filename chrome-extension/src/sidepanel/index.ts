@@ -5,7 +5,9 @@ import {
   parseMerchantIds,
 } from '../api/quick-report';
 import type { CodePlateValues, LogHandler, ReportOptions, WhitelistValues } from '../types';
-import { channelText, copyText, hasCustomChannel, validateChannels } from './helpers';
+import { copyText, hasCustomChannel, validateChannels } from './helpers';
+import { icon, setButtonLabel } from './icons';
+import { copyResultText, renderResultList } from './results';
 import { runBatchReset } from '../tools/batch-reset';
 import { runCustomChannelReset } from '../tools/custom-channel-reset';
 import { configureMerchantKeys, parseMerchantKeyIds } from '../tools/merchant-key';
@@ -48,16 +50,6 @@ function byId<T extends HTMLElement>(root: ParentNode, id: string): T {
   return element;
 }
 
-function copyResultText(results: MerchantReportResult[]): string {
-  return results.map((result) => {
-    const channels = [
-      result.wechat.state !== 'skipped' ? `微信子商户号:${channelText(result.wechat)}` : '',
-      result.alipay.state !== 'skipped' ? `支付宝子商户号:${channelText(result.alipay)}` : '',
-    ].filter(Boolean);
-    return [`乐刷商户号${result.merchantId}`, channels.join(' ')].join('\n');
-  }).join('\n');
-}
-
 function businessLineName(businessLine: 'syt' | 'lhsd'): string {
   return businessLine === 'lhsd' ? '联合收单' : '收银通';
 }
@@ -69,19 +61,21 @@ function createPanel(): void {
   root.id = 'syt-extension-root';
   root.innerHTML = `
     <section class="panel" aria-label="运营工具">
-      <header><div><button id="syt-back" class="icon-button" type="button" title="返回">←</button><span id="syt-title">运营工具 v${VERSION}</span></div></header>
+      <header class="app-header"><span class="brand">${icon('wrench')}运营工具</span><span class="version">v${VERSION}</span></header>
       <main>
+        <div class="tool-heading"><div><button id="syt-back" class="icon-button" type="button" title="返回重置页面" aria-label="返回重置页面">${icon('back')}</button><h1 id="syt-title">子商户号重置</h1></div><select id="syt-tool-select" aria-label="切换工具"><option value="" disabled selected>切换工具</option><option value="reset">子商户号重置</option><option value="code">码牌划转</option><option value="device">收银通机具划拨</option><option value="lhsd-device">联合收单机具划拨</option><option value="whitelist">防切户白名单</option><option value="bind-config">设备换绑配置</option></select></div>
         <section id="syt-view-reset" class="view active">
-          <label>乐刷商户号<input id="syt-merchant-ids" placeholder="重置最多 5 个；配置 key 不限，以 ; 分隔" autocomplete="off"></label>
-          <fieldset class="business-line"><legend>重置业务线</legend><label><input type="radio" name="syt-business-line" value="syt" checked>收银通</label><label><input type="radio" name="syt-business-line" value="lhsd">联合收单</label></fieldset>
-          <div class="form-row"><label>重置通道<select id="syt-report-type"><option value="ALL">全部重置</option><option value="WECHAT">微信重置</option><option value="ALIPAY">支付宝重置</option></select></label><label>上报预设<select id="syt-preset">${PRESETS.map((preset, index) => `<option value="${index}">${preset.name}</option>`).join('')}</select></label></div>
+          <fieldset class="segmented business-line"><legend class="sr-only">重置业务线</legend><label><input type="radio" name="syt-business-line" value="syt" checked>收银通</label><label><input type="radio" name="syt-business-line" value="lhsd">联合收单</label></fieldset>
+          <label for="syt-merchant-ids">乐刷商户号</label><div class="input-clear"><input id="syt-merchant-ids" placeholder="多个商户号以 ; 分隔" autocomplete="off" aria-describedby="syt-merchant-hint"><button id="syt-clear-merchant" type="button" class="icon-button" title="清空商户号" aria-label="清空商户号">${icon('close')}</button></div><div id="syt-merchant-hint" class="field-hint" aria-live="polite">重置最多 5 个 · 配置 key 不限数量</div>
+          <fieldset class="segmented report-channels"><legend class="sr-only">重置通道</legend><label><input type="radio" name="syt-report-type" value="WECHAT">微信</label><label><input type="radio" name="syt-report-type" value="ALIPAY">支付宝</label><label><input type="radio" name="syt-report-type" value="ALL" checked>全部</label></fieldset>
+          <details id="syt-optional-config" class="optional-config"><summary>${icon('chevron')}<span>可选配置</span><span id="syt-optional-summary">渠道 · appid · 授权目录</span></summary><div class="optional-content"><label>上报预设<select id="syt-preset">${PRESETS.map((preset, index) => `<option value="${index}">${preset.name}</option>`).join('')}</select></label>
           <div id="syt-channel-options" class="optional-options"><div class="section-title">可选上报渠道</div><div class="form-row"><label>微信渠道号<input id="syt-wx-channel-id" autocomplete="off"></label><label>微信渠道主体<input id="syt-wx-channel-name" autocomplete="off"></label></div><div class="form-row"><label>支付宝渠道号<input id="syt-alipay-channel-id" autocomplete="off"></label><label>支付宝渠道主体<input id="syt-alipay-channel-name" autocomplete="off"></label></div></div>
           <div class="section-title">微信支付参数（可选）</div><label>appid<input id="syt-appid" autocomplete="off"></label><label>支付授权目录<input id="syt-jsapi-paths" autocomplete="off"></label>
-          <div class="reset-actions"><button id="syt-run-reset" class="primary" type="button">执行重置</button><button id="syt-run-payment-config" type="button">配置绑定</button></div>
-          <div class="shared-tool-actions"><button id="syt-run-key" type="button">配置商户 key</button></div>
-          <div id="syt-reset-status" class="status"></div>
-          <div class="section-title">本次重置结果</div><div class="result-table-wrap"><table><thead><tr><th>乐刷商户号</th><th>微信子商户号</th><th>支付宝子商户号</th><th>方式</th></tr></thead><tbody id="syt-results"><tr><td colspan="4" class="empty">执行后显示结果</td></tr></tbody></table></div>
-          <div class="actions"><button id="syt-copy" type="button" disabled>复制结果</button><button class="nav-tool" data-view="code" type="button">码牌划转</button><div class="device-tool-actions"><button class="nav-tool" data-view="device" type="button">收银通机具划拨</button><button class="nav-tool" data-view="lhsd-device" type="button">联合收单机具划拨</button></div><button class="nav-tool" data-view="whitelist" type="button">防切户白名单</button><button class="nav-tool" data-view="bind-config" type="button">设备换绑配置</button></div>
+          </div></details>
+          <button id="syt-run-reset" class="primary" type="button">执行重置</button>
+          <div class="secondary-actions"><button id="syt-run-payment-config" type="button">配置绑定</button><button id="syt-run-key" type="button">配置商户 key</button></div>
+          <div id="syt-reset-status" class="status" role="status"></div>
+          <section class="results-section" aria-label="本次结果"><div class="results-heading"><h2>本次结果</h2><button id="syt-copy" class="text-button" type="button" disabled>${icon('copy')}复制全部</button></div><div id="syt-results"><p class="empty">暂无重置结果</p></div></section>
         </section>
         <section id="syt-view-bind-config" class="view">
           <label>乐刷 SN（必填）<span class="field-help" tabindex="0" aria-label="设备换绑配置说明" aria-describedby="syt-bind-config-help">?<span id="syt-bind-config-help" class="field-help-tooltip" role="tooltip">点击确认配置后，先按乐刷 SN 查询已有配置：有记录则修改该记录，没有记录则新增配置。查询失败时不会继续提交。</span></span><input id="syt-bind-config-sn" autocomplete="off" required></label>
@@ -93,7 +87,7 @@ function createPanel(): void {
         <section id="syt-view-device" class="view"><div class="section-title">机具信息</div><div class="form-row"><label>乐刷 SN 始<input id="syt-device-sn" autocomplete="off"></label><label>数量<input id="syt-device-quantity" value="1" readonly></label></div><button id="syt-device-query-old" type="button">查询旧代理商</button><div class="section-title">旧代理商</div><label>旧代理商编号<input id="syt-device-old-id" readonly></label><label>旧代理商名称<input id="syt-device-old-name" readonly></label><label>旧代理商类型<input id="syt-device-old-type" readonly></label><div class="section-title">新代理商</div><label>新代理商编号<input id="syt-device-new-id" autocomplete="off"></label><label>新代理商名称<input id="syt-device-new-name" readonly></label><label>新代理商类型<input id="syt-device-new-type" readonly></label><button id="syt-run-device" class="primary" type="button">确认划拨</button><div id="syt-device-status" class="status"></div></section>
         <section id="syt-view-lhsd-device" class="view"><label>SN<input id="syt-lhsd-device-sn" autocomplete="off"></label><label>旧代理商编号<input id="syt-lhsd-device-old-id" autocomplete="off"></label><label>新代理商编号<input id="syt-lhsd-device-new-id" autocomplete="off"></label><button id="syt-run-lhsd-device" class="primary" type="button">确认划拨</button><div id="syt-lhsd-device-status" class="status"></div></section>
         <section id="syt-view-whitelist" class="view"><div class="form-row"><label>手机号<input id="syt-white-mobile" autocomplete="off"></label><label>身份证号<input id="syt-white-id" autocomplete="off"></label></div><div class="form-row"><label>营业执照号<input id="syt-white-license" autocomplete="off"></label><label>结算账号<input id="syt-white-account" autocomplete="off"></label></div><button id="syt-run-whitelist" class="primary" type="button">添加防切户白名单</button><div id="syt-white-status" class="status"></div></section>
-        <section class="log"><div class="log-actions"><button id="syt-log-toggle" type="button">展开日志</button><button id="syt-log-clear" type="button">清空日志</button></div><div id="syt-log-preview">等待执行</div><pre id="syt-log-full"></pre></section>
+        <section class="log"><div class="log-actions"><button id="syt-log-toggle" class="text-button" type="button" aria-expanded="false" aria-controls="syt-log-full">${icon('chevron')}运行日志</button><button id="syt-log-clear" class="icon-button" type="button" title="清空日志" aria-label="清空日志">${icon('trash')}</button></div><div id="syt-log-preview" aria-live="polite">等待执行</div><div id="syt-log-full"></div></section>
       </main>
     </section>`;
   document.body.append(root);
@@ -102,7 +96,10 @@ function createPanel(): void {
   const title = byId<HTMLElement>(root, 'syt-title');
   const resetInput = byId<HTMLInputElement>(root, 'syt-merchant-ids');
   const businessLineInputs = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="syt-business-line"]'));
-  const reportType = byId<HTMLSelectElement>(root, 'syt-report-type');
+  const toolSelect = byId<HTMLSelectElement>(root, 'syt-tool-select');
+  const clearMerchant = byId<HTMLButtonElement>(root, 'syt-clear-merchant');
+  const merchantHint = byId<HTMLElement>(root, 'syt-merchant-hint');
+  const optionalConfig = byId<HTMLDetailsElement>(root, 'syt-optional-config');
   const preset = byId<HTMLSelectElement>(root, 'syt-preset');
   const channelOptions = byId<HTMLElement>(root, 'syt-channel-options');
   const wxChannelId = byId<HTMLInputElement>(root, 'syt-wx-channel-id');
@@ -115,14 +112,15 @@ function createPanel(): void {
   const runPaymentConfig = byId<HTMLButtonElement>(root, 'syt-run-payment-config');
   const runKey = byId<HTMLButtonElement>(root, 'syt-run-key');
   const resetStatus = byId<HTMLElement>(root, 'syt-reset-status');
-  const resultBody = byId<HTMLTableSectionElement>(root, 'syt-results');
+  const resultBody = byId<HTMLElement>(root, 'syt-results');
   const copyButton = byId<HTMLButtonElement>(root, 'syt-copy');
   const logPreview = byId<HTMLElement>(root, 'syt-log-preview');
-  const logFull = byId<HTMLPreElement>(root, 'syt-log-full');
+  const logFull = byId<HTMLElement>(root, 'syt-log-full');
   const logToggle = byId<HTMLButtonElement>(root, 'syt-log-toggle');
   const logClear = byId<HTMLButtonElement>(root, 'syt-log-clear');
   let latestResults: MerchantReportResult[] = [];
   let busy = false;
+  let resetRunning = false;
 
   const log: LogHandler = (message, isError = false) => {
     const line = `[${new Date().toLocaleString('zh-CN', { hour12: false })}] ${message}`;
@@ -143,6 +141,8 @@ function createPanel(): void {
     runReset.disabled = next;
     runPaymentConfig.disabled = next;
     runKey.disabled = next;
+    root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('#syt-view-reset input, #syt-view-reset select').forEach((control) => { control.disabled = next; });
+    clearMerchant.disabled = next;
     runReset.textContent = next ? '处理中...' : '执行重置';
   };
   const reportOptions = (): ReportOptions => ({
@@ -154,53 +154,33 @@ function createPanel(): void {
   const selectedBusinessLine = (): 'syt' | 'lhsd' => businessLineInputs.find((input) => input.checked)?.value === 'lhsd' ? 'lhsd' : 'syt';
   const renderResults = (results: MerchantReportResult[]) => {
     latestResults = results;
-    resultBody.replaceChildren();
-    if (!results.length) {
-      const row = document.createElement('tr');
-      const cell = document.createElement('td');
-      cell.colSpan = 4;
-      cell.className = 'empty';
-      cell.textContent = '执行后显示结果';
-      row.append(cell);
-      resultBody.append(row);
-      copyButton.disabled = true;
-      copyButton.classList.remove('copied');
-      copyButton.textContent = '复制结果';
-      return;
-    }
-    results.forEach((result) => {
-      const row = document.createElement('tr');
-      const lineName = businessLineName(result.businessLine || 'syt');
-      const routeText = result.route === 'batch' ? `${lineName}批量` : `${lineName}自定义渠道`;
-      [result.merchantId, channelText(result.wechat), channelText(result.alipay), routeText].forEach((value) => {
-        const cell = document.createElement('td');
-        cell.textContent = value;
-        if (value.startsWith('失败')) cell.className = 'error';
-        row.append(cell);
-      });
-      resultBody.append(row);
-    });
-    copyButton.disabled = false;
+    renderResultList(resultBody, results, resetRunning, (message) => log(message, true));
+    copyButton.disabled = !results.length;
     copyButton.classList.remove('copied');
-    copyButton.textContent = '复制结果';
+    setButtonLabel(copyButton, 'copy', '复制全部');
   };
   const copyCurrentResults = async (automatic = false) => {
     if (!latestResults.length) return;
     try {
       await copyText(copyResultText(latestResults));
       copyButton.classList.add('copied');
-      copyButton.textContent = '✓ 已复制';
+      setButtonLabel(copyButton, 'check', '已复制');
       log(automatic ? '已自动复制本批重置结果' : '已复制本批重置结果');
     } catch (error) {
       copyButton.classList.remove('copied');
-      copyButton.textContent = '复制结果';
+      setButtonLabel(copyButton, 'copy', '复制全部');
       log(`复制失败: ${error instanceof Error ? error.message : String(error)}`, true);
     }
   };
   const showView = (name: string) => {
     root.querySelectorAll<HTMLElement>('.view').forEach((view) => view.classList.toggle('active', view.id === `syt-view-${name}`));
     backButton.classList.toggle('visible', name !== 'reset');
-    title.textContent = `${name === 'reset' ? '运营工具' : ({ code: '码牌划转', device: '收银通机具划拨', 'lhsd-device': '联合收单机具划拨', 'bind-config': '设备换绑配置', whitelist: '防切户白名单' } as Record<string, string>)[name]} v${VERSION}`;
+    title.textContent = name === 'reset' ? '子商户号重置' : ({ code: '码牌划转', device: '收银通机具划拨', 'lhsd-device': '联合收单机具划拨', 'bind-config': '设备换绑配置', whitelist: '防切户白名单' } as Record<string, string>)[name];
+    toolSelect.value = '';
+  };
+  const updateOptionalSummary = () => {
+    const configured = Object.values(reportOptions()).some((value) => typeof value === 'string' && value.trim());
+    byId<HTMLElement>(root, 'syt-optional-summary').textContent = configured ? '已配置' : '渠道 · appid · 授权目录';
   };
   const applyPreset = () => {
     const option = PRESETS[Number(preset.value)] || PRESETS[0];
@@ -209,18 +189,35 @@ function createPanel(): void {
     appids.value = option.subAppids;
     jsapiPaths.value = option.jsapiPaths;
     channelOptions.classList.toggle('hidden', option.name === '无');
+    updateOptionalSummary();
   };
-
-  resetInput.addEventListener('dblclick', () => {
+  const updateMerchantHint = () => {
+    const ids = resetInput.value.split(';').map((value) => value.trim()).filter(Boolean);
+    let message = ids.length ? `已识别 ${ids.length} 个商户 · 重置最多 5 个` : '重置最多 5 个 · 配置 key 不限数量';
+    let invalid = false;
+    if (ids.some((id) => !/^\d{10}$/.test(id))) { message = '商户号需为 10 位数字，多个以英文 ; 分隔'; invalid = true; }
+    else if (new Set(ids).size !== ids.length) { message = '存在重复商户号，请检查'; invalid = true; }
+    else if (ids.length > 5) message = `已识别 ${ids.length} 个商户 · 仅配置 key 支持超过 5 个`;
+    merchantHint.textContent = message;
+    merchantHint.classList.toggle('error', invalid);
+    resetInput.setAttribute('aria-invalid', String(invalid));
+  };
+  const clearMerchantInput = () => {
+    if (busy) return;
     resetInput.value = '';
+    updateMerchantHint();
     resetInput.focus();
-  });
+  };
+  resetInput.addEventListener('dblclick', clearMerchantInput);
+  resetInput.addEventListener('input', updateMerchantHint);
+  clearMerchant.addEventListener('click', clearMerchantInput);
+  optionalConfig.addEventListener('input', updateOptionalSummary);
   backButton.addEventListener('click', () => showView('reset'));
   preset.addEventListener('change', applyPreset);
-  root.querySelectorAll<HTMLButtonElement>('.nav-tool').forEach((button) => button.addEventListener('click', () => showView(button.dataset.view || 'reset')));
+  toolSelect.addEventListener('change', () => showView(toolSelect.value));
   logToggle.addEventListener('click', () => {
     const isOpen = root.classList.toggle('log-open');
-    logToggle.textContent = isOpen ? '收起日志' : '展开日志';
+    logToggle.setAttribute('aria-expanded', String(isOpen));
   });
   logClear.addEventListener('click', () => { logFull.replaceChildren(); logPreview.textContent = '等待执行'; logPreview.className = ''; });
   copyButton.addEventListener('click', async () => {
@@ -230,7 +227,7 @@ function createPanel(): void {
     if (busy) return;
     try {
       const merchantIds = parseMerchantIds(resetInput.value);
-      const type = reportType.value as ReportType;
+      const type = root.querySelector<HTMLInputElement>('input[name="syt-report-type"]:checked')!.value as ReportType;
       const businessLine = selectedBusinessLine();
       const reportMode: ReportMode = businessLine === 'lhsd' ? 'COMMON' : 'SYT';
       const options = reportOptions();
@@ -239,6 +236,7 @@ function createPanel(): void {
         throw new Error('支付宝单独重置不能绑定微信支付参数，请选择微信或全部重置');
       }
       setBusy(true);
+      resetRunning = true;
       renderResults([]);
       const useCustomChannel = hasCustomChannel(options);
       setStatus(resetStatus, useCustomChannel ? `正在处理${businessLineName(businessLine)}自定义渠道重置` : `正在调用${businessLineName(businessLine)}批量重置接口`);
@@ -246,6 +244,7 @@ function createPanel(): void {
       const results = useCustomChannel
         ? await runCustomChannelReset(merchantIds, type, options, log, renderResults, businessLine)
         : await runBatchReset(merchantIds, type, options, log, reportMode);
+      resetRunning = false;
       renderResults(results);
       await copyCurrentResults(true);
       const failed = results.filter((item) => item.wechat.state === 'failure' || item.alipay.state === 'failure' || item.wechat.error || item.alipay.error).length;
@@ -256,6 +255,7 @@ function createPanel(): void {
       setStatus(resetStatus, message, true);
       log(`重置失败: ${message}`, true);
     } finally {
+      if (resetRunning) { resetRunning = false; renderResults(latestResults); }
       setBusy(false);
     }
   });
@@ -267,6 +267,8 @@ function createPanel(): void {
       if (merchantIds.length !== 1) throw new Error('配置绑定一次只能处理一个乐刷商户号');
       const options = reportOptions();
       if (!options.subAppids && !options.jsapiPaths) {
+        optionalConfig.open = true;
+        appids.focus();
         throw new Error('请至少填写 appid 或支付授权目录');
       }
       setBusy(true);

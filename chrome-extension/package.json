@@ -1,7 +1,7 @@
 {
   "name": "syt-operations-extension",
   "private": true,
-  "version": "1.0.6",
+  "version": "1.0.7",
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
@@ -12,5 +12,8 @@
     "esbuild": "^0.25.0",
     "typescript": "^5.7.3",
     "vitest": "^3.0.7"
+  },
+  "dependencies": {
+    "lucide": "1.47.0"
   }
 }

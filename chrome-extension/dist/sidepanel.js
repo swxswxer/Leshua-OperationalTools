@@ -285,6 +285,168 @@
     if (!copied) throw new Error("\u6D4F\u89C8\u5668\u62D2\u7EDD\u590D\u5236\u6743\u9650");
   }
 
+  // node_modules/lucide/dist/esm/defaultAttributes.mjs
+  var defaultAttributes = {
+    xmlns: "http://www.w3.org/2000/svg",
+    width: 24,
+    height: 24,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": 2,
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round"
+  };
+
+  // node_modules/lucide/dist/esm/createElement.mjs
+  var createSVGElement = ([tag, attrs, children]) => {
+    const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    Object.keys(attrs).forEach((name) => {
+      element.setAttribute(name, String(attrs[name]));
+    });
+    if (children?.length) {
+      children.forEach((child) => {
+        const childElement = createSVGElement(child);
+        element.appendChild(childElement);
+      });
+    }
+    return element;
+  };
+  var createElement = (iconNode, customAttrs = {}) => {
+    const tag = "svg";
+    const attrs = {
+      ...defaultAttributes,
+      ...customAttrs
+    };
+    return createSVGElement([tag, attrs, iconNode]);
+  };
+
+  // node_modules/lucide/dist/esm/icons/arrow-left.mjs
+  var ArrowLeft = [
+    ["path", { d: "m12 19-7-7 7-7" }],
+    ["path", { d: "M19 12H5" }]
+  ];
+
+  // node_modules/lucide/dist/esm/icons/check.mjs
+  var Check = [["path", { d: "M20 6 9 17l-5-5" }]];
+
+  // node_modules/lucide/dist/esm/icons/chevron-right.mjs
+  var ChevronRight = [["path", { d: "m9 18 6-6-6-6" }]];
+
+  // node_modules/lucide/dist/esm/icons/copy.mjs
+  var Copy = [
+    ["rect", { width: "14", height: "14", x: "8", y: "8", rx: "2", ry: "2" }],
+    ["path", { d: "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" }]
+  ];
+
+  // node_modules/lucide/dist/esm/icons/trash.mjs
+  var Trash = [
+    ["path", { d: "M10 11v6" }],
+    ["path", { d: "M14 11v6" }],
+    ["path", { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" }],
+    ["path", { d: "M3 6h18" }],
+    ["path", { d: "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }]
+  ];
+
+  // node_modules/lucide/dist/esm/icons/wrench.mjs
+  var Wrench = [
+    [
+      "path",
+      {
+        d: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"
+      }
+    ]
+  ];
+
+  // node_modules/lucide/dist/esm/icons/x.mjs
+  var X = [
+    ["path", { d: "M18 6 6 18" }],
+    ["path", { d: "m6 6 12 12" }]
+  ];
+
+  // src/sidepanel/icons.ts
+  var icons = { back: ArrowLeft, check: Check, chevron: ChevronRight, copy: Copy, trash: Trash, wrench: Wrench, close: X };
+  function icon(name) {
+    return createElement(icons[name], { width: 18, height: 18, "stroke-width": 1.8, "aria-hidden": "true", focusable: "false" }).outerHTML;
+  }
+  function setButtonLabel(button, name, label) {
+    button.innerHTML = icon(name);
+    if (label) button.append(document.createTextNode(label));
+  }
+
+  // src/sidepanel/results.ts
+  function copyResultText(results) {
+    return results.map((result) => {
+      const channels = [
+        result.wechat.state !== "skipped" ? `\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7:${channelText(result.wechat)}` : "",
+        result.alipay.state !== "skipped" ? `\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7:${channelText(result.alipay)}` : ""
+      ].filter(Boolean);
+      return [`\u4E50\u5237\u5546\u6237\u53F7${result.merchantId}`, channels.join(" ")].join("\n");
+    }).join("\n");
+  }
+  function resultSummary(result, running) {
+    const channels = [result.wechat, result.alipay].filter((channel) => channel.state !== "skipped");
+    if (channels.some((channel) => channel.state === "failure" || channel.error)) return { label: "\u5B58\u5728\u5931\u8D25\u9879", tone: "error" };
+    if (running || channels.some((channel) => channel.state === "pending")) return { label: "\u5904\u7406\u4E2D", tone: "pending" };
+    return channels.length ? { label: "\u5DF2\u5B8C\u6210", tone: "success" } : { label: "\u672A\u6267\u884C", tone: "muted" };
+  }
+  function textElement(tag, className, text) {
+    const element = document.createElement(tag);
+    element.className = className;
+    element.textContent = text;
+    return element;
+  }
+  function renderResultList(container, results, running, onError) {
+    container.replaceChildren();
+    if (!results.length) {
+      container.append(textElement("p", "empty", running ? "\u6B63\u5728\u7B49\u5F85\u540E\u53F0\u7ED3\u679C..." : "\u6682\u65E0\u91CD\u7F6E\u7ED3\u679C"));
+      return;
+    }
+    for (const result of results) {
+      const item = textElement("article", "merchant-result", "");
+      const heading = textElement("div", "merchant-heading", "");
+      const name = textElement("div", "merchant-name", "\u4E50\u5237\u5546\u6237\u53F7 ");
+      name.append(textElement("strong", "", result.merchantId));
+      const status = resultSummary(result, running);
+      heading.append(name, textElement("span", `result-status ${status.tone}`, status.label));
+      const lineName = result.businessLine === "lhsd" ? "\u8054\u5408\u6536\u5355" : "\u6536\u94F6\u901A";
+      item.append(heading, textElement("div", "result-route", `${lineName} \xB7 ${result.route === "batch" ? "\u6279\u91CF\u91CD\u7F6E" : "\u81EA\u5B9A\u4E49\u6E20\u9053"}`));
+      for (const [key, label] of [["wechat", "\u5FAE\u4FE1"], ["alipay", "\u652F\u4ED8\u5B9D"]]) {
+        const channel = result[key];
+        if (channel.state === "skipped") continue;
+        const row = textElement("div", "channel-result", "");
+        const content = textElement("div", "channel-content", "");
+        content.append(textElement("span", channel.state === "failure" ? "error" : "submerchant-id", channel.subMchId || channelText(channel)));
+        if (channel.subMchId && (channel.error || channel.note)) {
+          content.append(textElement("div", channel.error ? "channel-note error" : "channel-note", channel.note || `\u540E\u7EED\u6D41\u7A0B\u5931\u8D25\uFF1A${channel.error}`));
+        }
+        row.append(textElement("span", "channel-name", label), content);
+        if (channel.subMchId) {
+          const copy = document.createElement("button");
+          copy.type = "button";
+          copy.className = "icon-button copy-channel";
+          copy.title = `\u590D\u5236${label}\u5B50\u5546\u6237\u53F7`;
+          copy.setAttribute("aria-label", copy.title);
+          setButtonLabel(copy, "copy", "");
+          copy.addEventListener("click", async () => {
+            try {
+              await copyText(channel.subMchId);
+              copy.classList.add("copied");
+              setButtonLabel(copy, "check", "");
+              copy.title = "\u5DF2\u590D\u5236";
+              copy.setAttribute("aria-label", "\u5DF2\u590D\u5236");
+            } catch (error) {
+              onError(`\u590D\u5236\u5931\u8D25: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          });
+          row.append(copy);
+        }
+        item.append(row);
+      }
+      container.append(item);
+    }
+  }
+
   // src/api/payment-config.ts
   function createdAt(value) {
     return new Date(String(value || "").replace(/\.0$/, "").replace(" ", "T")).getTime() || 0;
@@ -1568,15 +1730,6 @@
     if (!element) throw new Error(`\u63D2\u4EF6\u9875\u9762\u7F3A\u5C11\u5143\u7D20: ${id}`);
     return element;
   }
-  function copyResultText(results) {
-    return results.map((result) => {
-      const channels = [
-        result.wechat.state !== "skipped" ? `\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7:${channelText(result.wechat)}` : "",
-        result.alipay.state !== "skipped" ? `\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7:${channelText(result.alipay)}` : ""
-      ].filter(Boolean);
-      return [`\u4E50\u5237\u5546\u6237\u53F7${result.merchantId}`, channels.join(" ")].join("\n");
-    }).join("\n");
-  }
   function businessLineName(businessLine) {
     return businessLine === "lhsd" ? "\u8054\u5408\u6536\u5355" : "\u6536\u94F6\u901A";
   }
@@ -1586,19 +1739,21 @@
     root.id = "syt-extension-root";
     root.innerHTML = `
     <section class="panel" aria-label="\u8FD0\u8425\u5DE5\u5177">
-      <header><div><button id="syt-back" class="icon-button" type="button" title="\u8FD4\u56DE">\u2190</button><span id="syt-title">\u8FD0\u8425\u5DE5\u5177 v${VERSION}</span></div></header>
+      <header class="app-header"><span class="brand">${icon("wrench")}\u8FD0\u8425\u5DE5\u5177</span><span class="version">v${VERSION}</span></header>
       <main>
+        <div class="tool-heading"><div><button id="syt-back" class="icon-button" type="button" title="\u8FD4\u56DE\u91CD\u7F6E\u9875\u9762" aria-label="\u8FD4\u56DE\u91CD\u7F6E\u9875\u9762">${icon("back")}</button><h1 id="syt-title">\u5B50\u5546\u6237\u53F7\u91CD\u7F6E</h1></div><select id="syt-tool-select" aria-label="\u5207\u6362\u5DE5\u5177"><option value="" disabled selected>\u5207\u6362\u5DE5\u5177</option><option value="reset">\u5B50\u5546\u6237\u53F7\u91CD\u7F6E</option><option value="code">\u7801\u724C\u5212\u8F6C</option><option value="device">\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8</option><option value="lhsd-device">\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8</option><option value="whitelist">\u9632\u5207\u6237\u767D\u540D\u5355</option><option value="bind-config">\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E</option></select></div>
         <section id="syt-view-reset" class="view active">
-          <label>\u4E50\u5237\u5546\u6237\u53F7<input id="syt-merchant-ids" placeholder="\u91CD\u7F6E\u6700\u591A 5 \u4E2A\uFF1B\u914D\u7F6E key \u4E0D\u9650\uFF0C\u4EE5 ; \u5206\u9694" autocomplete="off"></label>
-          <fieldset class="business-line"><legend>\u91CD\u7F6E\u4E1A\u52A1\u7EBF</legend><label><input type="radio" name="syt-business-line" value="syt" checked>\u6536\u94F6\u901A</label><label><input type="radio" name="syt-business-line" value="lhsd">\u8054\u5408\u6536\u5355</label></fieldset>
-          <div class="form-row"><label>\u91CD\u7F6E\u901A\u9053<select id="syt-report-type"><option value="ALL">\u5168\u90E8\u91CD\u7F6E</option><option value="WECHAT">\u5FAE\u4FE1\u91CD\u7F6E</option><option value="ALIPAY">\u652F\u4ED8\u5B9D\u91CD\u7F6E</option></select></label><label>\u4E0A\u62A5\u9884\u8BBE<select id="syt-preset">${PRESETS.map((preset2, index) => `<option value="${index}">${preset2.name}</option>`).join("")}</select></label></div>
+          <fieldset class="segmented business-line"><legend class="sr-only">\u91CD\u7F6E\u4E1A\u52A1\u7EBF</legend><label><input type="radio" name="syt-business-line" value="syt" checked>\u6536\u94F6\u901A</label><label><input type="radio" name="syt-business-line" value="lhsd">\u8054\u5408\u6536\u5355</label></fieldset>
+          <label for="syt-merchant-ids">\u4E50\u5237\u5546\u6237\u53F7</label><div class="input-clear"><input id="syt-merchant-ids" placeholder="\u591A\u4E2A\u5546\u6237\u53F7\u4EE5 ; \u5206\u9694" autocomplete="off" aria-describedby="syt-merchant-hint"><button id="syt-clear-merchant" type="button" class="icon-button" title="\u6E05\u7A7A\u5546\u6237\u53F7" aria-label="\u6E05\u7A7A\u5546\u6237\u53F7">${icon("close")}</button></div><div id="syt-merchant-hint" class="field-hint" aria-live="polite">\u91CD\u7F6E\u6700\u591A 5 \u4E2A \xB7 \u914D\u7F6E key \u4E0D\u9650\u6570\u91CF</div>
+          <fieldset class="segmented report-channels"><legend class="sr-only">\u91CD\u7F6E\u901A\u9053</legend><label><input type="radio" name="syt-report-type" value="WECHAT">\u5FAE\u4FE1</label><label><input type="radio" name="syt-report-type" value="ALIPAY">\u652F\u4ED8\u5B9D</label><label><input type="radio" name="syt-report-type" value="ALL" checked>\u5168\u90E8</label></fieldset>
+          <details id="syt-optional-config" class="optional-config"><summary>${icon("chevron")}<span>\u53EF\u9009\u914D\u7F6E</span><span id="syt-optional-summary">\u6E20\u9053 \xB7 appid \xB7 \u6388\u6743\u76EE\u5F55</span></summary><div class="optional-content"><label>\u4E0A\u62A5\u9884\u8BBE<select id="syt-preset">${PRESETS.map((preset2, index) => `<option value="${index}">${preset2.name}</option>`).join("")}</select></label>
           <div id="syt-channel-options" class="optional-options"><div class="section-title">\u53EF\u9009\u4E0A\u62A5\u6E20\u9053</div><div class="form-row"><label>\u5FAE\u4FE1\u6E20\u9053\u53F7<input id="syt-wx-channel-id" autocomplete="off"></label><label>\u5FAE\u4FE1\u6E20\u9053\u4E3B\u4F53<input id="syt-wx-channel-name" autocomplete="off"></label></div><div class="form-row"><label>\u652F\u4ED8\u5B9D\u6E20\u9053\u53F7<input id="syt-alipay-channel-id" autocomplete="off"></label><label>\u652F\u4ED8\u5B9D\u6E20\u9053\u4E3B\u4F53<input id="syt-alipay-channel-name" autocomplete="off"></label></div></div>
           <div class="section-title">\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\uFF08\u53EF\u9009\uFF09</div><label>appid<input id="syt-appid" autocomplete="off"></label><label>\u652F\u4ED8\u6388\u6743\u76EE\u5F55<input id="syt-jsapi-paths" autocomplete="off"></label>
-          <div class="reset-actions"><button id="syt-run-reset" class="primary" type="button">\u6267\u884C\u91CD\u7F6E</button><button id="syt-run-payment-config" type="button">\u914D\u7F6E\u7ED1\u5B9A</button></div>
-          <div class="shared-tool-actions"><button id="syt-run-key" type="button">\u914D\u7F6E\u5546\u6237 key</button></div>
-          <div id="syt-reset-status" class="status"></div>
-          <div class="section-title">\u672C\u6B21\u91CD\u7F6E\u7ED3\u679C</div><div class="result-table-wrap"><table><thead><tr><th>\u4E50\u5237\u5546\u6237\u53F7</th><th>\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7</th><th>\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7</th><th>\u65B9\u5F0F</th></tr></thead><tbody id="syt-results"><tr><td colspan="4" class="empty">\u6267\u884C\u540E\u663E\u793A\u7ED3\u679C</td></tr></tbody></table></div>
-          <div class="actions"><button id="syt-copy" type="button" disabled>\u590D\u5236\u7ED3\u679C</button><button class="nav-tool" data-view="code" type="button">\u7801\u724C\u5212\u8F6C</button><div class="device-tool-actions"><button class="nav-tool" data-view="device" type="button">\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8</button><button class="nav-tool" data-view="lhsd-device" type="button">\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8</button></div><button class="nav-tool" data-view="whitelist" type="button">\u9632\u5207\u6237\u767D\u540D\u5355</button><button class="nav-tool" data-view="bind-config" type="button">\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E</button></div>
+          </div></details>
+          <button id="syt-run-reset" class="primary" type="button">\u6267\u884C\u91CD\u7F6E</button>
+          <div class="secondary-actions"><button id="syt-run-payment-config" type="button">\u914D\u7F6E\u7ED1\u5B9A</button><button id="syt-run-key" type="button">\u914D\u7F6E\u5546\u6237 key</button></div>
+          <div id="syt-reset-status" class="status" role="status"></div>
+          <section class="results-section" aria-label="\u672C\u6B21\u7ED3\u679C"><div class="results-heading"><h2>\u672C\u6B21\u7ED3\u679C</h2><button id="syt-copy" class="text-button" type="button" disabled>${icon("copy")}\u590D\u5236\u5168\u90E8</button></div><div id="syt-results"><p class="empty">\u6682\u65E0\u91CD\u7F6E\u7ED3\u679C</p></div></section>
         </section>
         <section id="syt-view-bind-config" class="view">
           <label>\u4E50\u5237 SN\uFF08\u5FC5\u586B\uFF09<span class="field-help" tabindex="0" aria-label="\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E\u8BF4\u660E" aria-describedby="syt-bind-config-help">?<span id="syt-bind-config-help" class="field-help-tooltip" role="tooltip">\u70B9\u51FB\u786E\u8BA4\u914D\u7F6E\u540E\uFF0C\u5148\u6309\u4E50\u5237 SN \u67E5\u8BE2\u5DF2\u6709\u914D\u7F6E\uFF1A\u6709\u8BB0\u5F55\u5219\u4FEE\u6539\u8BE5\u8BB0\u5F55\uFF0C\u6CA1\u6709\u8BB0\u5F55\u5219\u65B0\u589E\u914D\u7F6E\u3002\u67E5\u8BE2\u5931\u8D25\u65F6\u4E0D\u4F1A\u7EE7\u7EED\u63D0\u4EA4\u3002</span></span><input id="syt-bind-config-sn" autocomplete="off" required></label>
@@ -1610,7 +1765,7 @@
         <section id="syt-view-device" class="view"><div class="section-title">\u673A\u5177\u4FE1\u606F</div><div class="form-row"><label>\u4E50\u5237 SN \u59CB<input id="syt-device-sn" autocomplete="off"></label><label>\u6570\u91CF<input id="syt-device-quantity" value="1" readonly></label></div><button id="syt-device-query-old" type="button">\u67E5\u8BE2\u65E7\u4EE3\u7406\u5546</button><div class="section-title">\u65E7\u4EE3\u7406\u5546</div><label>\u65E7\u4EE3\u7406\u5546\u7F16\u53F7<input id="syt-device-old-id" readonly></label><label>\u65E7\u4EE3\u7406\u5546\u540D\u79F0<input id="syt-device-old-name" readonly></label><label>\u65E7\u4EE3\u7406\u5546\u7C7B\u578B<input id="syt-device-old-type" readonly></label><div class="section-title">\u65B0\u4EE3\u7406\u5546</div><label>\u65B0\u4EE3\u7406\u5546\u7F16\u53F7<input id="syt-device-new-id" autocomplete="off"></label><label>\u65B0\u4EE3\u7406\u5546\u540D\u79F0<input id="syt-device-new-name" readonly></label><label>\u65B0\u4EE3\u7406\u5546\u7C7B\u578B<input id="syt-device-new-type" readonly></label><button id="syt-run-device" class="primary" type="button">\u786E\u8BA4\u5212\u62E8</button><div id="syt-device-status" class="status"></div></section>
         <section id="syt-view-lhsd-device" class="view"><label>SN<input id="syt-lhsd-device-sn" autocomplete="off"></label><label>\u65E7\u4EE3\u7406\u5546\u7F16\u53F7<input id="syt-lhsd-device-old-id" autocomplete="off"></label><label>\u65B0\u4EE3\u7406\u5546\u7F16\u53F7<input id="syt-lhsd-device-new-id" autocomplete="off"></label><button id="syt-run-lhsd-device" class="primary" type="button">\u786E\u8BA4\u5212\u62E8</button><div id="syt-lhsd-device-status" class="status"></div></section>
         <section id="syt-view-whitelist" class="view"><div class="form-row"><label>\u624B\u673A\u53F7<input id="syt-white-mobile" autocomplete="off"></label><label>\u8EAB\u4EFD\u8BC1\u53F7<input id="syt-white-id" autocomplete="off"></label></div><div class="form-row"><label>\u8425\u4E1A\u6267\u7167\u53F7<input id="syt-white-license" autocomplete="off"></label><label>\u7ED3\u7B97\u8D26\u53F7<input id="syt-white-account" autocomplete="off"></label></div><button id="syt-run-whitelist" class="primary" type="button">\u6DFB\u52A0\u9632\u5207\u6237\u767D\u540D\u5355</button><div id="syt-white-status" class="status"></div></section>
-        <section class="log"><div class="log-actions"><button id="syt-log-toggle" type="button">\u5C55\u5F00\u65E5\u5FD7</button><button id="syt-log-clear" type="button">\u6E05\u7A7A\u65E5\u5FD7</button></div><div id="syt-log-preview">\u7B49\u5F85\u6267\u884C</div><pre id="syt-log-full"></pre></section>
+        <section class="log"><div class="log-actions"><button id="syt-log-toggle" class="text-button" type="button" aria-expanded="false" aria-controls="syt-log-full">${icon("chevron")}\u8FD0\u884C\u65E5\u5FD7</button><button id="syt-log-clear" class="icon-button" type="button" title="\u6E05\u7A7A\u65E5\u5FD7" aria-label="\u6E05\u7A7A\u65E5\u5FD7">${icon("trash")}</button></div><div id="syt-log-preview" aria-live="polite">\u7B49\u5F85\u6267\u884C</div><div id="syt-log-full"></div></section>
       </main>
     </section>`;
     document.body.append(root);
@@ -1618,7 +1773,10 @@
     const title = byId(root, "syt-title");
     const resetInput = byId(root, "syt-merchant-ids");
     const businessLineInputs = Array.from(root.querySelectorAll('input[name="syt-business-line"]'));
-    const reportType = byId(root, "syt-report-type");
+    const toolSelect = byId(root, "syt-tool-select");
+    const clearMerchant = byId(root, "syt-clear-merchant");
+    const merchantHint = byId(root, "syt-merchant-hint");
+    const optionalConfig = byId(root, "syt-optional-config");
     const preset = byId(root, "syt-preset");
     const channelOptions = byId(root, "syt-channel-options");
     const wxChannelId = byId(root, "syt-wx-channel-id");
@@ -1639,6 +1797,7 @@
     const logClear = byId(root, "syt-log-clear");
     let latestResults = [];
     let busy = false;
+    let resetRunning = false;
     const log = (message, isError = false) => {
       const line = `[${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN", { hour12: false })}] ${message}`;
       const row = document.createElement("div");
@@ -1658,6 +1817,10 @@
       runReset.disabled = next;
       runPaymentConfig.disabled = next;
       runKey.disabled = next;
+      root.querySelectorAll("#syt-view-reset input, #syt-view-reset select").forEach((control) => {
+        control.disabled = next;
+      });
+      clearMerchant.disabled = next;
       runReset.textContent = next ? "\u5904\u7406\u4E2D..." : "\u6267\u884C\u91CD\u7F6E";
     };
     const reportOptions = () => ({
@@ -1672,53 +1835,33 @@
     const selectedBusinessLine = () => businessLineInputs.find((input) => input.checked)?.value === "lhsd" ? "lhsd" : "syt";
     const renderResults = (results) => {
       latestResults = results;
-      resultBody.replaceChildren();
-      if (!results.length) {
-        const row = document.createElement("tr");
-        const cell = document.createElement("td");
-        cell.colSpan = 4;
-        cell.className = "empty";
-        cell.textContent = "\u6267\u884C\u540E\u663E\u793A\u7ED3\u679C";
-        row.append(cell);
-        resultBody.append(row);
-        copyButton.disabled = true;
-        copyButton.classList.remove("copied");
-        copyButton.textContent = "\u590D\u5236\u7ED3\u679C";
-        return;
-      }
-      results.forEach((result) => {
-        const row = document.createElement("tr");
-        const lineName = businessLineName(result.businessLine || "syt");
-        const routeText = result.route === "batch" ? `${lineName}\u6279\u91CF` : `${lineName}\u81EA\u5B9A\u4E49\u6E20\u9053`;
-        [result.merchantId, channelText(result.wechat), channelText(result.alipay), routeText].forEach((value) => {
-          const cell = document.createElement("td");
-          cell.textContent = value;
-          if (value.startsWith("\u5931\u8D25")) cell.className = "error";
-          row.append(cell);
-        });
-        resultBody.append(row);
-      });
-      copyButton.disabled = false;
+      renderResultList(resultBody, results, resetRunning, (message) => log(message, true));
+      copyButton.disabled = !results.length;
       copyButton.classList.remove("copied");
-      copyButton.textContent = "\u590D\u5236\u7ED3\u679C";
+      setButtonLabel(copyButton, "copy", "\u590D\u5236\u5168\u90E8");
     };
     const copyCurrentResults = async (automatic = false) => {
       if (!latestResults.length) return;
       try {
         await copyText(copyResultText(latestResults));
         copyButton.classList.add("copied");
-        copyButton.textContent = "\u2713 \u5DF2\u590D\u5236";
+        setButtonLabel(copyButton, "check", "\u5DF2\u590D\u5236");
         log(automatic ? "\u5DF2\u81EA\u52A8\u590D\u5236\u672C\u6279\u91CD\u7F6E\u7ED3\u679C" : "\u5DF2\u590D\u5236\u672C\u6279\u91CD\u7F6E\u7ED3\u679C");
       } catch (error) {
         copyButton.classList.remove("copied");
-        copyButton.textContent = "\u590D\u5236\u7ED3\u679C";
+        setButtonLabel(copyButton, "copy", "\u590D\u5236\u5168\u90E8");
         log(`\u590D\u5236\u5931\u8D25: ${error instanceof Error ? error.message : String(error)}`, true);
       }
     };
     const showView = (name) => {
       root.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === `syt-view-${name}`));
       backButton.classList.toggle("visible", name !== "reset");
-      title.textContent = `${name === "reset" ? "\u8FD0\u8425\u5DE5\u5177" : { code: "\u7801\u724C\u5212\u8F6C", device: "\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8", "lhsd-device": "\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8", "bind-config": "\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name]} v${VERSION}`;
+      title.textContent = name === "reset" ? "\u5B50\u5546\u6237\u53F7\u91CD\u7F6E" : { code: "\u7801\u724C\u5212\u8F6C", device: "\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8", "lhsd-device": "\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8", "bind-config": "\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name];
+      toolSelect.value = "";
+    };
+    const updateOptionalSummary = () => {
+      const configured = Object.values(reportOptions()).some((value) => typeof value === "string" && value.trim());
+      byId(root, "syt-optional-summary").textContent = configured ? "\u5DF2\u914D\u7F6E" : "\u6E20\u9053 \xB7 appid \xB7 \u6388\u6743\u76EE\u5F55";
     };
     const applyPreset = () => {
       const option = PRESETS[Number(preset.value)] || PRESETS[0];
@@ -1727,17 +1870,39 @@
       appids.value = option.subAppids;
       jsapiPaths.value = option.jsapiPaths;
       channelOptions.classList.toggle("hidden", option.name === "\u65E0");
+      updateOptionalSummary();
     };
-    resetInput.addEventListener("dblclick", () => {
+    const updateMerchantHint = () => {
+      const ids = resetInput.value.split(";").map((value) => value.trim()).filter(Boolean);
+      let message = ids.length ? `\u5DF2\u8BC6\u522B ${ids.length} \u4E2A\u5546\u6237 \xB7 \u91CD\u7F6E\u6700\u591A 5 \u4E2A` : "\u91CD\u7F6E\u6700\u591A 5 \u4E2A \xB7 \u914D\u7F6E key \u4E0D\u9650\u6570\u91CF";
+      let invalid = false;
+      if (ids.some((id) => !/^\d{10}$/.test(id))) {
+        message = "\u5546\u6237\u53F7\u9700\u4E3A 10 \u4F4D\u6570\u5B57\uFF0C\u591A\u4E2A\u4EE5\u82F1\u6587 ; \u5206\u9694";
+        invalid = true;
+      } else if (new Set(ids).size !== ids.length) {
+        message = "\u5B58\u5728\u91CD\u590D\u5546\u6237\u53F7\uFF0C\u8BF7\u68C0\u67E5";
+        invalid = true;
+      } else if (ids.length > 5) message = `\u5DF2\u8BC6\u522B ${ids.length} \u4E2A\u5546\u6237 \xB7 \u4EC5\u914D\u7F6E key \u652F\u6301\u8D85\u8FC7 5 \u4E2A`;
+      merchantHint.textContent = message;
+      merchantHint.classList.toggle("error", invalid);
+      resetInput.setAttribute("aria-invalid", String(invalid));
+    };
+    const clearMerchantInput = () => {
+      if (busy) return;
       resetInput.value = "";
+      updateMerchantHint();
       resetInput.focus();
-    });
+    };
+    resetInput.addEventListener("dblclick", clearMerchantInput);
+    resetInput.addEventListener("input", updateMerchantHint);
+    clearMerchant.addEventListener("click", clearMerchantInput);
+    optionalConfig.addEventListener("input", updateOptionalSummary);
     backButton.addEventListener("click", () => showView("reset"));
     preset.addEventListener("change", applyPreset);
-    root.querySelectorAll(".nav-tool").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view || "reset")));
+    toolSelect.addEventListener("change", () => showView(toolSelect.value));
     logToggle.addEventListener("click", () => {
       const isOpen = root.classList.toggle("log-open");
-      logToggle.textContent = isOpen ? "\u6536\u8D77\u65E5\u5FD7" : "\u5C55\u5F00\u65E5\u5FD7";
+      logToggle.setAttribute("aria-expanded", String(isOpen));
     });
     logClear.addEventListener("click", () => {
       logFull.replaceChildren();
@@ -1751,7 +1916,7 @@
       if (busy) return;
       try {
         const merchantIds = parseMerchantIds(resetInput.value);
-        const type = reportType.value;
+        const type = root.querySelector('input[name="syt-report-type"]:checked').value;
         const businessLine = selectedBusinessLine();
         const reportMode = businessLine === "lhsd" ? "COMMON" : "SYT";
         const options = reportOptions();
@@ -1760,11 +1925,13 @@
           throw new Error("\u652F\u4ED8\u5B9D\u5355\u72EC\u91CD\u7F6E\u4E0D\u80FD\u7ED1\u5B9A\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\uFF0C\u8BF7\u9009\u62E9\u5FAE\u4FE1\u6216\u5168\u90E8\u91CD\u7F6E");
         }
         setBusy(true);
+        resetRunning = true;
         renderResults([]);
         const useCustomChannel = hasCustomChannel(options);
         setStatus(resetStatus, useCustomChannel ? `\u6B63\u5728\u5904\u7406${businessLineName(businessLine)}\u81EA\u5B9A\u4E49\u6E20\u9053\u91CD\u7F6E` : `\u6B63\u5728\u8C03\u7528${businessLineName(businessLine)}\u6279\u91CF\u91CD\u7F6E\u63A5\u53E3`);
         log(`\u5F00\u59CB${businessLineName(businessLine)}${useCustomChannel ? "\u81EA\u5B9A\u4E49\u6E20\u9053" : "\u6279\u91CF"}\u91CD\u7F6E: ${merchantIds.join("\uFF1B")}`);
         const results = useCustomChannel ? await runCustomChannelReset(merchantIds, type, options, log, renderResults, businessLine) : await runBatchReset(merchantIds, type, options, log, reportMode);
+        resetRunning = false;
         renderResults(results);
         await copyCurrentResults(true);
         const failed = results.filter((item) => item.wechat.state === "failure" || item.alipay.state === "failure" || item.wechat.error || item.alipay.error).length;
@@ -1775,6 +1942,10 @@
         setStatus(resetStatus, message, true);
         log(`\u91CD\u7F6E\u5931\u8D25: ${message}`, true);
       } finally {
+        if (resetRunning) {
+          resetRunning = false;
+          renderResults(latestResults);
+        }
         setBusy(false);
       }
     });
@@ -1785,6 +1956,8 @@
         if (merchantIds.length !== 1) throw new Error("\u914D\u7F6E\u7ED1\u5B9A\u4E00\u6B21\u53EA\u80FD\u5904\u7406\u4E00\u4E2A\u4E50\u5237\u5546\u6237\u53F7");
         const options = reportOptions();
         if (!options.subAppids && !options.jsapiPaths) {
+          optionalConfig.open = true;
+          appids.focus();
           throw new Error("\u8BF7\u81F3\u5C11\u586B\u5199 appid \u6216\u652F\u4ED8\u6388\u6743\u76EE\u5F55");
         }
         setBusy(true);
