@@ -50,7 +50,9 @@
     Object.entries(request.fields).forEach(([key, value]) => form.append(key, value));
     const buffer = base64ToBuffer(request.fileBase64);
     form.append(request.fileField, new Blob([buffer], { type: request.fileType }), request.fileName);
-    return fetchWithTimeout(request.url, { method: "POST", body: form }, request.timeoutMs);
+    const headers = new Headers(request.headers);
+    headers.delete("Content-Type");
+    return fetchWithTimeout(request.url, { method: "POST", body: form, headers }, request.timeoutMs);
   }
   function handleRequest(request) {
     return request.kind === "multipart" ? handleMultipartRequest(request) : handleTextRequest(request);

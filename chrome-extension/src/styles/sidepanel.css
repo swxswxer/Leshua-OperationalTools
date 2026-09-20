@@ -107,3 +107,5 @@ h2 { font-size: calc(var(--font-title) - 1px); font-weight: 600; }
 .field-help-tooltip { display: none; position: absolute; z-index: 3; top: calc(100% + 6px); left: -100px; width: 240px; max-width: calc(100vw - 48px); padding: 9px 10px; border: 1px solid #d8dee8; border-radius: 4px; background: #fff; box-shadow: 0 3px 10px #00000015; color: #374151; font-size: 12px; line-height: 1.6; font-weight: 400; }
 .field-help:hover .field-help-tooltip, .field-help:focus .field-help-tooltip { display: block; }
 @media (max-width: 350px) { main { padding: 16px 12px; } .app-header { padding: 12px; gap: 8px; flex-wrap: wrap; } .form-row { grid-template-columns: minmax(0,1fr); } .merchant-heading { align-items: start; } .merchant-name strong { display: block; } .optional-config summary { flex-wrap: wrap; } #syt-optional-summary { flex-basis: 100%; text-align: left; padding-left: 25px; } .tool-heading { gap: 6px; } #syt-tool-select { flex-basis: 104px; width: 104px; } }
+.status.cups-success { color: #15803d; }
+.status.cups-warning { color: #a16207; }

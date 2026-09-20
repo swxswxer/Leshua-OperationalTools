@@ -21,5 +21,6 @@ await build({
 await cp(new URL('./src/styles/sidepanel.css', root), new URL('./sidepanel.css', dist));
 await cp(new URL('./src/sidepanel/index.html', root), new URL('./sidepanel.html', dist));
 await cp(new URL('./manifest.json', root), new URL('./manifest.json', dist));
+await cp(new URL('./assets/', root), new URL('./assets/', dist), { recursive: true });
 
 console.log('构建完成：dist/ 已生成，可在 Chrome 加载该目录。');

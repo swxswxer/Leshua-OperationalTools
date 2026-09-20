@@ -12,6 +12,7 @@ export interface BackendTextRequest {
 }
 
 export interface BackendMultipartRequest {
+  headers?: Record<string, string>;
   kind: 'multipart';
   url: string;
   fields: Record<string, string>;

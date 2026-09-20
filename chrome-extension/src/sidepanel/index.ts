@@ -16,6 +16,7 @@ import { transferCodePlates } from '../tools/code-plate-transfer';
 import { addChangeWhitelist } from '../tools/change-whitelist';
 import { bindLatestWechatPaymentConfig } from '../tools/payment-config';
 import { saveDeviceBindConfig } from '../tools/device-bind-config';
+import { reportCups } from '../tools/cups-report';
 import {
   queryNewDeviceAgent,
   queryOldDeviceAgent,
@@ -79,6 +80,10 @@ function createPanel(): void {
           <div id="syt-reset-status" class="status" role="status"></div>
           <section class="results-section" aria-label="本次结果"><div class="results-heading"><h2>本次结果</h2><button id="syt-copy" class="text-button" type="button" disabled>${icon('copy')}复制全部</button></div><div id="syt-results"><p class="empty">暂无重置结果</p></div></section>
         </section>
+        <section id="syt-view-cups" class="view">
+          <label for="syt-cups-merchant">乐刷商户号</label><input id="syt-cups-merchant" inputmode="numeric" autocomplete="off" placeholder="10 位乐刷商户号">
+          <button id="syt-run-cups" class="primary" type="button">提交上报申请</button><div id="syt-cups-status" class="status" role="status" aria-live="polite"></div>
+        </section>
         <section id="syt-view-bind-config" class="view">
           <label>乐刷 SN（必填）<span class="field-help" tabindex="0" aria-label="设备换绑配置说明" aria-describedby="syt-bind-config-help">?<span id="syt-bind-config-help" class="field-help-tooltip" role="tooltip">点击确认配置后，先按乐刷 SN 查询已有配置：有记录则修改该记录，没有记录则新增配置。查询失败时不会继续提交。</span></span><input id="syt-bind-config-sn" autocomplete="off" required></label>
           <div class="form-row"><label>单日最大绑定次数<input id="syt-bind-config-day" type="number" min="0" step="1" value="3" placeholder="3"></label><label>单月最大绑定次数<input id="syt-bind-config-month" type="number" min="0" step="1" value="3" placeholder="3"></label></div>
@@ -100,6 +105,7 @@ function createPanel(): void {
   const resetInput = byId<HTMLInputElement>(root, 'syt-merchant-ids');
   const businessLineInputs = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="syt-business-line"]'));
   const toolSelect = byId<HTMLSelectElement>(root, 'syt-tool-select');
+  toolSelect.add(new Option('CUPS 上报', 'cups'));
   const clearMerchant = byId<HTMLButtonElement>(root, 'syt-clear-merchant');
   const merchantHint = byId<HTMLElement>(root, 'syt-merchant-hint');
   const optionalConfig = byId<HTMLDetailsElement>(root, 'syt-optional-config');
@@ -178,7 +184,7 @@ function createPanel(): void {
   const showView = (name: string) => {
     root.querySelectorAll<HTMLElement>('.view').forEach((view) => view.classList.toggle('active', view.id === `syt-view-${name}`));
     backButton.classList.toggle('visible', name !== 'reset');
-    title.textContent = name === 'reset' ? '子商户号重置' : ({ code: '码牌划转', device: '收银通机具划拨', 'lhsd-device': '联合收单机具划拨', 'bind-config': '设备换绑配置', whitelist: '防切户白名单' } as Record<string, string>)[name];
+    title.textContent = name === 'reset' ? '子商户号重置' : ({ cups: 'CUPS 上报', code: '码牌划转', device: '收银通机具划拨', 'lhsd-device': '联合收单机具划拨', 'bind-config': '设备换绑配置', whitelist: '防切户白名单' } as Record<string, string>)[name];
     toolSelect.value = '';
   };
   const updateOptionalSummary = () => {
@@ -438,6 +444,32 @@ function createPanel(): void {
       log(`联合收单机具划拨失败: ${message}`, true);
     } finally {
       lhsdDeviceSubmit.disabled = false;
+    }
+  });
+  const cupsSubmit = byId<HTMLButtonElement>(root, 'syt-run-cups');
+  const cupsMerchant = byId<HTMLInputElement>(root, 'syt-cups-merchant');
+  const cupsStatus = byId<HTMLElement>(root, 'syt-cups-status');
+  cupsSubmit.addEventListener('click', async () => {
+    if (cupsSubmit.disabled) return;
+    cupsSubmit.disabled = true;
+    cupsMerchant.disabled = true;
+    cupsSubmit.textContent = '提交中...';
+    try {
+      const result = await reportCups(cupsMerchant.value, (message) => {
+        setStatus(cupsStatus, message);
+        log(message);
+      });
+      setStatus(cupsStatus, result.message);
+      cupsStatus.classList.add(result.state === 'accepted' ? 'cups-success' : 'cups-warning');
+      log(result.message);
+    } catch (error) {
+      const message = `CUPS 上报申请未确认成功：${error instanceof Error ? error.message : String(error)}`;
+      setStatus(cupsStatus, message, true);
+      log(message, true);
+    } finally {
+      cupsSubmit.disabled = false;
+      cupsMerchant.disabled = false;
+      cupsSubmit.textContent = '提交上报申请';
     }
   });
   const bindConfigView = byId<HTMLElement>(root, 'syt-view-bind-config');

@@ -166,6 +166,7 @@ export async function requestMultipartText(
   fileField: string,
   file: File,
   timeoutMs = 30000,
+  headers?: Record<string, string>,
 ): Promise<string> {
   const response = await sendBackendRequest({
     kind: 'multipart',
@@ -175,6 +176,7 @@ export async function requestMultipartText(
     fileName: file.name,
     fileType: file.type || 'application/octet-stream',
     fileBase64: bytesToBase64(new Uint8Array(await file.arrayBuffer())),
+    headers,
     timeoutMs,
   });
   return response.text;
