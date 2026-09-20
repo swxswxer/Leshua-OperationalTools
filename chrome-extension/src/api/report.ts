@@ -1,4 +1,59 @@
-import { SAAS, assertMerchantId, normalizeText, requestJson } from './http';
+import { SAAS, assertMerchantId, buildFormBody, formatDateTime, normalizeText, requestJson } from './http';
+import type { ChannelName } from './quick-report';
+
+export interface ReportRecord {
+  fId?: string | number;
+  fMerchantId?: string | number;
+  fStatus?: string | number;
+  fCreateTime?: string;
+  fUpdateTime?: string;
+  fWxMsg?: string;
+  fZfbMsg?: string;
+}
+
+function recordTime(row: ReportRecord): number {
+  return Date.parse((row.fCreateTime || '').replace(' ', 'T')) || 0;
+}
+
+export function latestReportFailure(rows: ReportRecord[], merchantId: string, channel: ChannelName): { reason: string; time: string } | null {
+  // 先取最新记录再判断失败，避免跳过最新成功记录而取到历史失败。
+  const latest = rows.filter(row => String(row.fMerchantId) === merchantId)
+    .sort((a, b) => recordTime(b) - recordTime(a) || Number(b.fId || 0) - Number(a.fId || 0))[0];
+  if (!latest || String(latest.fStatus) !== '3') return null;
+  const reason = normalizeText(channel === 'wechat' ? latest.fWxMsg : latest.fZfbMsg);
+  if (!reason || /^(success|上报成功|成功)$/i.test(reason)) return null;
+  return { reason, time: latest.fUpdateTime || latest.fCreateTime || '时间未知' };
+}
+
+export async function queryLatestReportFailure(merchantId: string, channel: ChannelName): Promise<{ reason: string; time: string } | null> {
+  assertMerchantId(merchantId);
+  const endpoint = channel === 'wechat' ? 'wxsubmch' : 'zfbsubmch';
+  const records: ReportRecord[] = [];
+  const end = formatDateTime(new Date());
+  // 不假设后端默认排序，读取完整分页后再选最新记录；超出上限不返回可能错误的历史原因。
+  for (let page = 1; page <= 10; page += 1) {
+    const response = await requestJson<{ total?: number | string; rows?: ReportRecord[] }>(`${SAAS}/${endpoint}.do?method=list`, {
+      method: 'POST', timeoutMs: 10000,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+      body: buildFormBody({
+        fCreateTimeStart: '2018-01-01 00:00:00', fCreateTimeEnd: end,
+        fChannelType: '', fPayType: '', fStatus: '', fInUse: '', fUpdateTimeStart: '', fUpdateTimeEnd: '',
+        fAgentId1g: '', fMerchantId: merchantId,
+        ...(channel === 'wechat'
+          ? { fCanTrade: '', fChannelId: '', fWxSubMchId: '', fAuthorizeState: '', syncPlatform: '' }
+          : { fSourcePid: '', fZfbSubMchId: '', fZfbSubMchLevel: '', fUpgradeStatus: '', fMchStatus: '' }),
+        page, rows: 100,
+      }),
+    });
+    if (!Array.isArray(response?.rows)) throw new Error('上报记录接口未返回有效的 rows');
+    records.push(...response.rows);
+    const total = response.total == null ? NaN : Number(response.total);
+    if (Number.isFinite(total) && total >= 0 && records.length >= total) return latestReportFailure(records, merchantId, channel);
+    if (!Number.isFinite(total) && response.rows.length < 100) return latestReportFailure(records, merchantId, channel);
+    if (!response.rows.length) throw new Error('上报记录分页不完整');
+  }
+  throw new Error('上报记录超过查询上限，请到后台查看最新记录');
+}
 
 export interface WechatChannelOptions {
   channelId: string;

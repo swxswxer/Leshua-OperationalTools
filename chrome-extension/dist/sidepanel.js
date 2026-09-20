@@ -528,34 +528,52 @@
     return { id, wxSubMchId: normalizeText(row.fWxSubMchId) };
   }
 
-  // src/tools/batch-reset.ts
-  async function bindWechatPaymentConfigs(results, options, log) {
-    if (!options.subAppids && !options.jsapiPaths) return;
-    for (const result of results) {
-      if (result.wechat.state !== "success" || !result.wechat.subMchId) continue;
-      try {
-        log(`\u5F00\u59CB\u7ED1\u5B9A\u5546\u6237 ${result.merchantId} \u7684\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570`);
-        await bindWechatPaymentConfig(result.merchantId, result.wechat.subMchId, options);
-        log(`\u5546\u6237 ${result.merchantId} \u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\u7ED1\u5B9A\u5B8C\u6210`);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        result.wechat.note = `\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\u7ED1\u5B9A\u5931\u8D25\uFF1A${message}`;
-        log(`\u5546\u6237 ${result.merchantId} ${result.wechat.note}`, true);
-      }
-    }
-  }
-  async function runBatchReset(merchantIds, reportType, options, log, reportMode = "SYT") {
-    const results = await submitQuickReport(merchantIds, reportType, reportMode);
-    results.forEach((result) => {
-      result.businessLine = reportMode === "COMMON" ? "lhsd" : "syt";
-    });
-    if (isRequested(reportType, "wechat")) {
-      await bindWechatPaymentConfigs(results, options, log);
-    }
-    return results;
-  }
-
   // src/api/report.ts
+  function recordTime(row) {
+    return Date.parse((row.fCreateTime || "").replace(" ", "T")) || 0;
+  }
+  function latestReportFailure(rows, merchantId, channel) {
+    const latest = rows.filter((row) => String(row.fMerchantId) === merchantId).sort((a, b) => recordTime(b) - recordTime(a) || Number(b.fId || 0) - Number(a.fId || 0))[0];
+    if (!latest || String(latest.fStatus) !== "3") return null;
+    const reason = normalizeText(channel === "wechat" ? latest.fWxMsg : latest.fZfbMsg);
+    if (!reason || /^(success|上报成功|成功)$/i.test(reason)) return null;
+    return { reason, time: latest.fUpdateTime || latest.fCreateTime || "\u65F6\u95F4\u672A\u77E5" };
+  }
+  async function queryLatestReportFailure(merchantId, channel) {
+    assertMerchantId(merchantId);
+    const endpoint = channel === "wechat" ? "wxsubmch" : "zfbsubmch";
+    const records = [];
+    const end = formatDateTime(/* @__PURE__ */ new Date());
+    for (let page = 1; page <= 10; page += 1) {
+      const response = await requestJson(`${SAAS}/${endpoint}.do?method=list`, {
+        method: "POST",
+        timeoutMs: 1e4,
+        headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+        body: buildFormBody({
+          fCreateTimeStart: "2018-01-01 00:00:00",
+          fCreateTimeEnd: end,
+          fChannelType: "",
+          fPayType: "",
+          fStatus: "",
+          fInUse: "",
+          fUpdateTimeStart: "",
+          fUpdateTimeEnd: "",
+          fAgentId1g: "",
+          fMerchantId: merchantId,
+          ...channel === "wechat" ? { fCanTrade: "", fChannelId: "", fWxSubMchId: "", fAuthorizeState: "", syncPlatform: "" } : { fSourcePid: "", fZfbSubMchId: "", fZfbSubMchLevel: "", fUpgradeStatus: "", fMchStatus: "" },
+          page,
+          rows: 100
+        })
+      });
+      if (!Array.isArray(response?.rows)) throw new Error("\u4E0A\u62A5\u8BB0\u5F55\u63A5\u53E3\u672A\u8FD4\u56DE\u6709\u6548\u7684 rows");
+      records.push(...response.rows);
+      const total = response.total == null ? NaN : Number(response.total);
+      if (Number.isFinite(total) && total >= 0 && records.length >= total) return latestReportFailure(records, merchantId, channel);
+      if (!Number.isFinite(total) && response.rows.length < 100) return latestReportFailure(records, merchantId, channel);
+      if (!response.rows.length) throw new Error("\u4E0A\u62A5\u8BB0\u5F55\u5206\u9875\u4E0D\u5B8C\u6574");
+    }
+    throw new Error("\u4E0A\u62A5\u8BB0\u5F55\u8D85\u8FC7\u67E5\u8BE2\u4E0A\u9650\uFF0C\u8BF7\u5230\u540E\u53F0\u67E5\u770B\u6700\u65B0\u8BB0\u5F55");
+  }
   var DEFAULT_WECHAT_CHANNEL_ID = "209096974";
   var DEFAULT_WECHAT_CHANNEL_NAME = "\u6DF1\u5733\u5E02\u524D\u6D77\u626B\u626B\u79D1\u6280\u6709\u9650\u516C\u53F8";
   var DEFAULT_ALIPAY_CHANNEL_ID = "2088621549599695";
@@ -618,6 +636,55 @@
     const subMchId = normalizeText(data.zfbSubMch || response.zfbSubMch || response.data);
     if (!/^\d+$/.test(subMchId)) throw new Error(`\u652F\u4ED8\u5B9D\u4E0A\u62A5\u6210\u529F\u4F46\u672A\u8FD4\u56DE\u5B50\u5546\u6237\u53F7: ${JSON.stringify(response)}`);
     return subMchId;
+  }
+
+  // src/tools/batch-reset.ts
+  async function supplementFailureReasons(results, log) {
+    for (const result of results) {
+      await Promise.all(["wechat", "alipay"].map(async (channel) => {
+        const outcome = result[channel];
+        if (outcome.state !== "failure") return;
+        const label = channel === "wechat" ? "\u5FAE\u4FE1" : "\u652F\u4ED8\u5B9D";
+        log(`\u5546\u6237 ${result.merchantId} ${label}\u91CD\u7F6E\u5931\u8D25\uFF0C\u6B63\u5728\u67E5\u8BE2\u6700\u65B0\u4E0A\u62A5\u8BB0\u5F55`);
+        try {
+          const failure2 = await queryLatestReportFailure(result.merchantId, channel);
+          if (failure2) {
+            outcome.error = `${outcome.error || "\u4E0A\u62A5\u5931\u8D25"}\uFF1B\u6700\u65B0\u4E0A\u62A5\u8BB0\u5F55\uFF08${failure2.time}\uFF0C\u4F9B\u53C2\u8003\uFF09\uFF1A${failure2.reason}`;
+          } else {
+            outcome.error = `${outcome.error || "\u4E0A\u62A5\u5931\u8D25"}\uFF1B\u6700\u65B0\u8BB0\u5F55\u672A\u63D0\u4F9B\u53EF\u7528\u5931\u8D25\u539F\u56E0\uFF0C\u8BF7\u5230\u540E\u53F0\u6838\u5B9E`;
+          }
+        } catch (error) {
+          outcome.error = `${outcome.error || "\u4E0A\u62A5\u5931\u8D25"}\uFF1B\u5931\u8D25\u539F\u56E0\u67E5\u8BE2\u5F02\u5E38\uFF1A${error instanceof Error ? error.message : String(error)}`;
+        }
+        log(`\u5546\u6237 ${result.merchantId} ${label}\uFF1A${outcome.error}`, true);
+      }));
+    }
+  }
+  async function bindWechatPaymentConfigs(results, options, log) {
+    if (!options.subAppids && !options.jsapiPaths) return;
+    for (const result of results) {
+      if (result.wechat.state !== "success" || !result.wechat.subMchId) continue;
+      try {
+        log(`\u5F00\u59CB\u7ED1\u5B9A\u5546\u6237 ${result.merchantId} \u7684\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570`);
+        await bindWechatPaymentConfig(result.merchantId, result.wechat.subMchId, options);
+        log(`\u5546\u6237 ${result.merchantId} \u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\u7ED1\u5B9A\u5B8C\u6210`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        result.wechat.note = `\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\u7ED1\u5B9A\u5931\u8D25\uFF1A${message}`;
+        log(`\u5546\u6237 ${result.merchantId} ${result.wechat.note}`, true);
+      }
+    }
+  }
+  async function runBatchReset(merchantIds, reportType, options, log, reportMode = "SYT") {
+    const results = await submitQuickReport(merchantIds, reportType, reportMode);
+    results.forEach((result) => {
+      result.businessLine = reportMode === "COMMON" ? "lhsd" : "syt";
+    });
+    await supplementFailureReasons(results, log);
+    if (isRequested(reportType, "wechat")) {
+      await bindWechatPaymentConfigs(results, options, log);
+    }
+    return results;
   }
 
   // src/api/mapping.ts
