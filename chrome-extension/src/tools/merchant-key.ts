@@ -1,5 +1,5 @@
 import type { LogHandler } from '../types';
-import { configureMerchantKey as configureMerchantKeyRequest } from '../api/merchant-key';
+import { configureMerchantKey as configureMerchantKeyRequest, queryMerchantKey } from '../api/merchant-key';
 
 const CONCURRENCY = 5;
 
@@ -7,6 +7,8 @@ export interface MerchantKeyBatchResult {
   merchantId: string;
   ok: boolean;
   error?: string;
+  key?: string;
+  queryError?: string;
 }
 
 export function parseMerchantKeyIds(raw: string): string[] {
@@ -41,15 +43,18 @@ export async function configureMerchantKeys(
         results[index] = { merchantId, ok: false, error: message };
         log(`商户 ${merchantId} key 配置失败: ${message}`, true);
       }
+      try {
+        results[index].key = await queryMerchantKey(merchantId);
+        log(`商户 ${merchantId} key 查询成功`);
+      } catch (error) {
+        results[index].queryError = error instanceof Error ? error.message : String(error);
+        log(`商户 ${merchantId} key 查询失败: ${results[index].queryError}`, true);
+      }
     }
   };
 
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, merchantIds.length) }, () => worker()));
   const failures = results.filter((result) => !result.ok);
-  if (failures.length) {
-    const details = failures.map((result) => `${result.merchantId}: ${result.error}`).join('；');
-    throw new Error(`商户 key 批量配置完成，成功 ${results.length - failures.length} 个，失败 ${failures.length} 个。${details}`);
-  }
-  log(`商户 key 批量配置完成，共成功 ${results.length} 个`);
+  log(`商户 key 处理完成，配置成功 ${results.length - failures.length} 个，查询到 key ${results.filter(result => result.key).length} 个`, failures.length > 0);
   return results;
 }

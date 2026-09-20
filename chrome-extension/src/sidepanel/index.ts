@@ -17,6 +17,7 @@ import { addChangeWhitelist } from '../tools/change-whitelist';
 import { bindLatestWechatPaymentConfig } from '../tools/payment-config';
 import { saveDeviceBindConfig } from '../tools/device-bind-config';
 import { reportCups } from '../tools/cups-report';
+import { initializeSnAuthorization, snAuthorizationView } from './sn-authorization';
 import {
   queryNewDeviceAgent,
   queryOldDeviceAgent,
@@ -80,6 +81,7 @@ function createPanel(): void {
           <div id="syt-reset-status" class="status" role="status"></div>
           <section class="results-section" aria-label="本次结果"><div class="results-heading"><h2>本次结果</h2><button id="syt-copy" class="text-button" type="button" disabled>${icon('copy')}复制全部</button></div><div id="syt-results"><p class="empty">暂无重置结果</p></div></section>
         </section>
+        ${snAuthorizationView}
         <section id="syt-view-cups" class="view">
           <label for="syt-cups-merchant">乐刷商户号</label><input id="syt-cups-merchant" inputmode="numeric" autocomplete="off" placeholder="10 位乐刷商户号">
           <button id="syt-run-cups" class="primary" type="button">提交上报申请</button><div id="syt-cups-status" class="status" role="status" aria-live="polite"></div>
@@ -106,6 +108,7 @@ function createPanel(): void {
   const businessLineInputs = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="syt-business-line"]'));
   const toolSelect = byId<HTMLSelectElement>(root, 'syt-tool-select');
   toolSelect.add(new Option('CUPS 上报', 'cups'));
+  toolSelect.add(new Option('SN 授权码下发', 'sn-authorization'));
   const clearMerchant = byId<HTMLButtonElement>(root, 'syt-clear-merchant');
   const merchantHint = byId<HTMLElement>(root, 'syt-merchant-hint');
   const optionalConfig = byId<HTMLDetailsElement>(root, 'syt-optional-config');
@@ -184,7 +187,7 @@ function createPanel(): void {
   const showView = (name: string) => {
     root.querySelectorAll<HTMLElement>('.view').forEach((view) => view.classList.toggle('active', view.id === `syt-view-${name}`));
     backButton.classList.toggle('visible', name !== 'reset');
-    title.textContent = name === 'reset' ? '子商户号重置' : ({ cups: 'CUPS 上报', code: '码牌划转', device: '收银通机具划拨', 'lhsd-device': '联合收单机具划拨', 'bind-config': '设备换绑配置', whitelist: '防切户白名单' } as Record<string, string>)[name];
+    title.textContent = name === 'reset' ? '子商户号重置' : ({ 'sn-authorization': 'SN 授权码下发', cups: 'CUPS 上报', code: '码牌划转', device: '收银通机具划拨', 'lhsd-device': '联合收单机具划拨', 'bind-config': '设备换绑配置', whitelist: '防切户白名单' } as Record<string, string>)[name];
     toolSelect.value = '';
   };
   const updateOptionalSummary = () => {
@@ -303,8 +306,24 @@ function createPanel(): void {
       const merchantIds = parseMerchantKeyIds(resetInput.value);
       setBusy(true);
       setStatus(resetStatus, `正在批量配置 ${merchantIds.length} 个商户的 key...`);
-      await configureMerchantKeys(merchantIds, log);
-      setStatus(resetStatus, `商户 key 配置完成，共成功 ${merchantIds.length} 个`);
+      const results = await configureMerchantKeys(merchantIds, log);
+      setStatus(resetStatus, '');
+      for (const result of results) {
+        const item = document.createElement('div');
+        const message = document.createElement('p');
+        message.textContent = `${result.merchantId}：${result.ok ? '配置成功' : `配置失败：${result.error}`}${result.queryError ? `；查询失败：${result.queryError}` : ''}`;
+        if (!result.ok || result.queryError) message.className = 'error';
+        item.append(message);
+        if (result.key) {
+          const field = document.createElement('input');
+          field.readOnly = true;
+          field.value = result.key;
+          field.setAttribute('aria-label', `商户 ${result.merchantId} 的 key`);
+          field.addEventListener('click', () => field.select());
+          item.append(field);
+        }
+        resetStatus.append(item);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatus(resetStatus, message, true);
@@ -504,6 +523,7 @@ function createPanel(): void {
     const values: WhitelistValues = { mobile: byId<HTMLInputElement>(root, 'syt-white-mobile').value.trim(), idCard: byId<HTMLInputElement>(root, 'syt-white-id').value.trim(), businessLicense: byId<HTMLInputElement>(root, 'syt-white-license').value.trim(), settlementAccount: byId<HTMLInputElement>(root, 'syt-white-account').value.trim() };
     try { setStatus(status, '处理中...'); await addChangeWhitelist(values, log, (_state, message) => setStatus(status, message)); setStatus(status, '防切户白名单添加完成'); } catch (error) { setStatus(status, error instanceof Error ? error.message : String(error), true); }
   });
+  initializeSnAuthorization(root, log);
   applyPreset();
 }
 

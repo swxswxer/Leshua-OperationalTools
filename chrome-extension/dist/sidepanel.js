@@ -942,6 +942,16 @@
   }
 
   // src/api/merchant-key.ts
+  async function queryMerchantKey(merchantId) {
+    assertMerchantId(merchantId);
+    const response = await requestJson(
+      `${SAAS}/merchant-key-info.do?method=getMerchantKeyInfo&merchantId=${encodeURIComponent(merchantId)}`,
+      { method: "POST", timeoutMs: 15e3 }
+    );
+    if (!response || String(response.respCode) !== "0") throw new Error(response?.respMsg || "\u5546\u6237 key \u67E5\u8BE2\u5931\u8D25");
+    if (typeof response.data !== "string" || !response.data.trim()) throw new Error("\u67E5\u8BE2\u6210\u529F\u4F46\u672A\u8FD4\u56DE\u5546\u6237 key");
+    return response.data.trim();
+  }
   async function configureMerchantKey(merchantId) {
     assertMerchantId(merchantId);
     const html = await requestText(`${SAAS}/merchant-key-info.do?method=add`, {
@@ -990,15 +1000,18 @@
           results[index] = { merchantId, ok: false, error: message };
           log(`\u5546\u6237 ${merchantId} key \u914D\u7F6E\u5931\u8D25: ${message}`, true);
         }
+        try {
+          results[index].key = await queryMerchantKey(merchantId);
+          log(`\u5546\u6237 ${merchantId} key \u67E5\u8BE2\u6210\u529F`);
+        } catch (error) {
+          results[index].queryError = error instanceof Error ? error.message : String(error);
+          log(`\u5546\u6237 ${merchantId} key \u67E5\u8BE2\u5931\u8D25: ${results[index].queryError}`, true);
+        }
       }
     };
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, merchantIds.length) }, () => worker()));
     const failures = results.filter((result) => !result.ok);
-    if (failures.length) {
-      const details = failures.map((result) => `${result.merchantId}: ${result.error}`).join("\uFF1B");
-      throw new Error(`\u5546\u6237 key \u6279\u91CF\u914D\u7F6E\u5B8C\u6210\uFF0C\u6210\u529F ${results.length - failures.length} \u4E2A\uFF0C\u5931\u8D25 ${failures.length} \u4E2A\u3002${details}`);
-    }
-    log(`\u5546\u6237 key \u6279\u91CF\u914D\u7F6E\u5B8C\u6210\uFF0C\u5171\u6210\u529F ${results.length} \u4E2A`);
+    log(`\u5546\u6237 key \u5904\u7406\u5B8C\u6210\uFF0C\u914D\u7F6E\u6210\u529F ${results.length - failures.length} \u4E2A\uFF0C\u67E5\u8BE2\u5230 key ${results.filter((result) => result.key).length} \u4E2A`, failures.length > 0);
     return results;
   }
 
@@ -2693,8 +2706,203 @@
     return submitCupsApplication(file, applicant);
   }
 
+  // src/api/sn-authorization.ts
+  var ENDPOINT2 = `${ORIGIN}/base-business/pinpad/agentWhiteList.do`;
+  function parseHtml(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    doc.querySelectorAll("script, style").forEach((node) => node.remove());
+    const error = detectHtmlError(doc.documentElement.outerHTML);
+    if (error) throw new Error(error);
+    return doc;
+  }
+  function assertAgentApplyResponse(html) {
+    const doc = parseHtml(html);
+    const text = normalizeText(doc.body.textContent);
+    if (/失败|错误|异常/.test(text) || !/操作成功[!！]?/.test(text)) {
+      throw new Error(text.slice(0, 240) || "\u65E0\u6CD5\u786E\u8BA4\u4EE3\u7406\u5546\u4FE1\u606F\u662F\u5426\u63D0\u4EA4\u6210\u529F\uFF0C\u8BF7\u5230\u540E\u53F0\u6838\u5B9E");
+    }
+  }
+  async function applyAuthorizationAgent(values) {
+    const html = await requestText(`${ENDPOINT2}?method=apply`, {
+      method: "POST",
+      timeoutMs: 3e4,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: buildFormBody({ ...values, status: "1", applicantReason: "1" })
+    });
+    assertAgentApplyResponse(html);
+  }
+  function parseAuthorizationAgent(html, agentId) {
+    const doc = parseHtml(html);
+    const table = doc.querySelector("table.tablesorter");
+    if (!table) throw new Error("\u4EE3\u7406\u8BB0\u5F55\u67E5\u8BE2\u54CD\u5E94\u683C\u5F0F\u5F02\u5E38\uFF0C\u672A\u53D1\u9001\u6388\u6743\u7801");
+    const headers = Array.from(table.querySelectorAll("thead th")).map((el) => normalizeText(el.textContent));
+    const required = ["\u4EE3\u7406\u5546\u7F16\u53F7", "\u90AE\u7BB1", "\u72B6\u6001", "\u64CD\u4F5C"];
+    if (required.some((name) => !headers.includes(name))) throw new Error("\u4EE3\u7406\u8BB0\u5F55\u8868\u5934\u4E0D\u5B8C\u6574\uFF0C\u672A\u53D1\u9001\u6388\u6743\u7801");
+    const pageText = normalizeText(doc.querySelector("table.page")?.textContent);
+    const pageCount = pageText.match(/共\s*(\d+)\s*页/);
+    if (pageCount && Number(pageCount[1]) > 1) throw new Error("\u4EE3\u7406\u8BB0\u5F55\u6709\u591A\u9875\uFF0C\u8BF7\u5728\u540E\u53F0\u786E\u8BA4\u552F\u4E00\u6709\u6548\u63A5\u6536\u8BB0\u5F55");
+    const matches = [];
+    for (const tr of Array.from(table.querySelectorAll("tbody > tr"))) {
+      const cells = Array.from(tr.children).filter((el) => el.tagName === "TD");
+      const value = (name) => normalizeText(cells[headers.indexOf(name)]?.textContent);
+      if (value("\u4EE3\u7406\u5546\u7F16\u53F7") !== agentId || value("\u72B6\u6001") !== "\u5DF2\u751F\u6548") continue;
+      const operation = cells[headers.indexOf("\u64CD\u4F5C")];
+      const ids = Array.from(operation?.querySelectorAll("a") || []).map((link) => {
+        const onclick = link.getAttribute("onclick") || "";
+        const path = onclick.match(/['"]([^'"]*agentWhiteList\.do\?method=issueCode[^'"]*)['"]/);
+        return path ? new URL(path[1], ENDPOINT2).searchParams.get("id") : null;
+      }).filter((id) => Boolean(id));
+      if (ids.length !== 1 || !/^\d+$/.test(ids[0])) throw new Error("\u6709\u6548\u4EE3\u7406\u8BB0\u5F55\u7F3A\u5C11\u552F\u4E00\u53D1\u9001 ID");
+      const email = value("\u90AE\u7BB1");
+      if (!/^[^\s@*]+@[^\s@*]+\.[^\s@*]+$/.test(email)) throw new Error("\u4EE3\u7406\u8BB0\u5F55\u90AE\u7BB1\u4E3A\u7A7A\u6216\u5DF2\u8131\u654F\uFF0C\u8BF7\u5148\u5728\u540E\u53F0\u6838\u5B9E");
+      matches.push({ id: ids[0], agentId, email });
+    }
+    if (matches.length > 1) throw new Error("\u5B58\u5728\u591A\u6761\u5DF2\u751F\u6548\u4EE3\u7406\u8BB0\u5F55\uFF0C\u8BF7\u5728\u540E\u53F0\u786E\u8BA4\u63A5\u6536\u90AE\u7BB1\u540E\u518D\u53D1\u9001");
+    return matches[0] || null;
+  }
+  async function queryAuthorizationAgent(agentId) {
+    const html = await requestText(`${ENDPOINT2}?method=list`, {
+      method: "POST",
+      timeoutMs: 15e3,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: buildFormBody({ createTimeRange: "", status: "", applicant: "", phone: "", email: "", receiver: "", agentId, pageSize: 200 })
+    });
+    return parseAuthorizationAgent(html, agentId);
+  }
+  function assertAuthorizationIssued(text) {
+    let response;
+    try {
+      response = JSON.parse(text);
+    } catch {
+      parseHtml(text);
+      throw new Error("\u53D1\u9001\u63A5\u53E3\u8FD4\u56DE\u975E JSON\uFF0C\u72B6\u6001\u672A\u77E5\uFF0C\u8BF7\u5148\u6838\u5B9E\u90AE\u7BB1\u53CA\u540E\u53F0\uFF0C\u52FF\u91CD\u590D\u53D1\u9001");
+    }
+    if (!response || String(response.code) !== "0" || response.success !== true) {
+      throw new Error(response?.msg || response?.message || "\u53D1\u9001\u63A5\u53E3\u672A\u786E\u8BA4\u6210\u529F\uFF0C\u8BF7\u5230\u540E\u53F0\u6838\u5B9E");
+    }
+  }
+  async function issueAuthorizationCode(file, id) {
+    const response = await requestMultipartText(
+      `${ENDPOINT2}?method=issueCode`,
+      { id, reason: "4" },
+      "uploadFile",
+      file,
+      3e4,
+      { Accept: "application/json, text/javascript, */*; q=0.01", "X-Requested-With": "XMLHttpRequest" }
+    );
+    assertAuthorizationIssued(response);
+  }
+
+  // src/tools/sn-authorization.ts
+  function normalizeAgentId(value) {
+    const id = value.trim();
+    if (!/^\d+$/.test(id)) throw new Error("\u8BF7\u586B\u5199\u7EAF\u6570\u5B57\u4EE3\u7406\u7F16\u53F7");
+    return id;
+  }
+  async function submitAgentContact(input) {
+    const values = { agentId: normalizeAgentId(input.agentId), phone: input.phone.trim(), receiver: input.receiver.trim(), email: input.email.trim() };
+    if (!/^1\d{10}$/.test(values.phone)) throw new Error("\u8BF7\u586B\u5199 11 \u4F4D\u624B\u673A\u53F7");
+    if (!values.receiver) throw new Error("\u8BF7\u586B\u5199\u53D1\u9001\u4EBA");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) throw new Error("\u8BF7\u586B\u5199\u6709\u6548\u90AE\u7BB1");
+    await applyAuthorizationAgent(values);
+  }
+  function createSnAuthorizationFile(bytes, sn) {
+    if (!/^[A-Za-z0-9]+$/.test(sn)) throw new Error("\u4E50\u5237 SN \u53EA\u80FD\u5305\u542B\u82F1\u6587\u5B57\u6BCD\u548C\u6570\u5B57");
+    const entries = unzipSync(bytes);
+    const path = "xl/worksheets/sheet1.xml";
+    if (!entries[path]) throw new Error("SN \u5B98\u65B9\u6A21\u677F\u7F3A\u5C11\u5DE5\u4F5C\u8868");
+    const doc = new DOMParser().parseFromString(strFromU8(entries[path]), "application/xml");
+    if (doc.querySelector("parsererror")) throw new Error("SN \u5B98\u65B9\u6A21\u677F\u683C\u5F0F\u9519\u8BEF");
+    const cell = doc.querySelector('c[r="A2"]');
+    if (!cell) throw new Error("SN \u5B98\u65B9\u6A21\u677F\u7F3A\u5C11 A2");
+    const inline = doc.createElementNS(doc.documentElement.namespaceURI, "is");
+    const text = doc.createElementNS(doc.documentElement.namespaceURI, "t");
+    text.textContent = sn;
+    inline.append(text);
+    cell.setAttribute("t", "inlineStr");
+    cell.replaceChildren(inline);
+    entries[path] = strToU8(new XMLSerializer().serializeToString(doc));
+    return new File([new Uint8Array(zipSync(entries)).buffer], "SN\u6388\u6743\u7801\u4E0B\u53D1\u6A21\u677F.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+  }
+  async function sendSnAuthorization(agentInput, snInput, progress) {
+    const agentId = normalizeAgentId(agentInput);
+    const sn = snInput.trim();
+    if (!/^[A-Za-z0-9]+$/.test(sn)) throw new Error("\u8BF7\u586B\u5199\u4E50\u5237 SN\uFF0C\u53EA\u652F\u6301\u82F1\u6587\u5B57\u6BCD\u548C\u6570\u5B57");
+    progress("\u6B63\u5728\u67E5\u8BE2\u4EE3\u7406\u8BB0\u5F55...");
+    const agent = await queryAuthorizationAgent(agentId);
+    if (!agent) throw new Error("\u672A\u67E5\u8BE2\u5230\u5DF2\u751F\u6548\u4EE3\u7406\u8BB0\u5F55\uFF0C\u8BF7\u5148\u63D0\u4EA4\u4EE3\u7406\u5546\u4FE1\u606F");
+    progress("\u6B63\u5728\u751F\u6210 SN \u6388\u6743\u7801 Excel...");
+    const response = await fetch(chrome.runtime.getURL("assets/sn_authorization_template.xlsx"), { signal: AbortSignal.timeout(1e4) });
+    if (!response.ok) throw new Error("\u65E0\u6CD5\u52A0\u8F7D SN \u5B98\u65B9\u6A21\u677F\uFF0C\u8BF7\u91CD\u65B0\u52A0\u8F7D\u5B8C\u6574\u63D2\u4EF6");
+    const file = createSnAuthorizationFile(new Uint8Array(await response.arrayBuffer()), sn);
+    progress(`\u6B63\u5728\u5411 ${agent.email} \u53D1\u9001\u6388\u6743\u7801...`);
+    try {
+      await issueAuthorizationCode(file, agent.id);
+    } catch (error) {
+      throw new Error(`${error instanceof Error ? error.message : String(error)}\uFF1B\u91CD\u65B0\u53D1\u9001\u524D\u8BF7\u5148\u6838\u5B9E\u540E\u53F0\u53CA\u90AE\u7BB1`);
+    }
+    return agent.email;
+  }
+
+  // src/sidepanel/sn-authorization.ts
+  var snAuthorizationView = `
+  <section id="syt-view-sn-authorization" class="view">
+    <label>\u4EE3\u7406\u7F16\u53F7<input id="syt-sn-agent" inputmode="numeric" autocomplete="off"></label>
+    <label>\u624B\u673A\u53F7<input id="syt-sn-phone" type="tel" autocomplete="off"></label>
+    <label>\u53D1\u9001\u4EBA<input id="syt-sn-receiver" autocomplete="off" title="\u5BF9\u5E94\u540E\u53F0\u7684\u63A5\u6536\u4EBA\u5B57\u6BB5 receiver"></label>
+    <label>\u90AE\u7BB1<input id="syt-sn-email" type="email" autocomplete="off"></label>
+    <button id="syt-sn-apply" type="button">\u63D0\u4EA4\u4EE3\u7406\u5546\u4FE1\u606F</button>
+    <div class="section-title">\u6388\u6743\u7801\u4E0B\u53D1</div>
+    <label>\u4E50\u5237 SN<input id="syt-sn-value" autocomplete="off"></label>
+    <button id="syt-sn-send" type="button" class="primary">\u53D1\u9001\u6388\u6743\u7801</button>
+    <div id="syt-sn-status" class="status" role="status" aria-live="polite"></div>
+  </section>`;
+  function initializeSnAuthorization(root, log) {
+    const view = root.querySelector("#syt-view-sn-authorization");
+    const status = view.querySelector("#syt-sn-status");
+    const value = (id) => view.querySelector(`#syt-sn-${id}`).value;
+    let busy = false;
+    for (const action of ["apply", "send"]) {
+      view.querySelector(`#syt-sn-${action}`).addEventListener("click", async () => {
+        if (busy) return;
+        busy = true;
+        const controls = view.querySelectorAll("input, button");
+        controls.forEach((control) => {
+          control.disabled = true;
+        });
+        const update = (message, error = false) => {
+          status.style.color = "";
+          status.textContent = message;
+          status.className = `status${error ? " error" : ""}`;
+          log(message, error);
+        };
+        try {
+          if (action === "apply") {
+            update("\u6B63\u5728\u63D0\u4EA4\u4EE3\u7406\u5546\u4FE1\u606F...");
+            await submitAgentContact({ agentId: value("agent"), phone: value("phone"), receiver: value("receiver"), email: value("email") });
+            update("\u4EE3\u7406\u5546\u4FE1\u606F\u63D0\u4EA4\u6210\u529F");
+          } else {
+            const email = await sendSnAuthorization(value("agent"), value("value"), update);
+            update(`\u6388\u6743\u7801\u53D1\u9001\u6210\u529F\uFF0C\u63A5\u6536\u90AE\u7BB1\uFF1A${email}`);
+          }
+          status.style.color = "#15803d";
+        } catch (error) {
+          update(`${action === "apply" ? "\u4EE3\u7406\u5546\u4FE1\u606F\u63D0\u4EA4" : "\u6388\u6743\u7801\u53D1\u9001"}\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`, true);
+          status.style.color = "";
+        } finally {
+          busy = false;
+          controls.forEach((control) => {
+            control.disabled = false;
+          });
+        }
+      });
+    }
+  }
+
   // src/api/device-transfer.ts
-  var ENDPOINT2 = "/base-business/pinpad/newTerminal.do";
+  var ENDPOINT3 = "/base-business/pinpad/newTerminal.do";
   var LHSD_TRANSFER_ENDPOINT = "/uts_platform/machine/manager/machineChangeAgent.do";
   function trim(value) {
     return value.trim();
@@ -2705,7 +2913,7 @@
   }
   async function request(method, values, fetchImpl) {
     const body = new URLSearchParams(values);
-    const url = `${ORIGIN}${ENDPOINT2}?method=${encodeURIComponent(method)}`;
+    const url = `${ORIGIN}${ENDPOINT3}?method=${encodeURIComponent(method)}`;
     if (!fetchImpl) {
       const payload = await requestJson(url, {
         method: "POST",
@@ -2895,6 +3103,7 @@
           <div id="syt-reset-status" class="status" role="status"></div>
           <section class="results-section" aria-label="\u672C\u6B21\u7ED3\u679C"><div class="results-heading"><h2>\u672C\u6B21\u7ED3\u679C</h2><button id="syt-copy" class="text-button" type="button" disabled>${icon("copy")}\u590D\u5236\u5168\u90E8</button></div><div id="syt-results"><p class="empty">\u6682\u65E0\u91CD\u7F6E\u7ED3\u679C</p></div></section>
         </section>
+        ${snAuthorizationView}
         <section id="syt-view-cups" class="view">
           <label for="syt-cups-merchant">\u4E50\u5237\u5546\u6237\u53F7</label><input id="syt-cups-merchant" inputmode="numeric" autocomplete="off" placeholder="10 \u4F4D\u4E50\u5237\u5546\u6237\u53F7">
           <button id="syt-run-cups" class="primary" type="button">\u63D0\u4EA4\u4E0A\u62A5\u7533\u8BF7</button><div id="syt-cups-status" class="status" role="status" aria-live="polite"></div>
@@ -2920,6 +3129,7 @@
     const businessLineInputs = Array.from(root.querySelectorAll('input[name="syt-business-line"]'));
     const toolSelect = byId(root, "syt-tool-select");
     toolSelect.add(new Option("CUPS \u4E0A\u62A5", "cups"));
+    toolSelect.add(new Option("SN \u6388\u6743\u7801\u4E0B\u53D1", "sn-authorization"));
     const clearMerchant = byId(root, "syt-clear-merchant");
     const merchantHint = byId(root, "syt-merchant-hint");
     const optionalConfig = byId(root, "syt-optional-config");
@@ -3002,7 +3212,7 @@
     const showView = (name) => {
       root.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === `syt-view-${name}`));
       backButton.classList.toggle("visible", name !== "reset");
-      title.textContent = name === "reset" ? "\u5B50\u5546\u6237\u53F7\u91CD\u7F6E" : { cups: "CUPS \u4E0A\u62A5", code: "\u7801\u724C\u5212\u8F6C", device: "\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8", "lhsd-device": "\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8", "bind-config": "\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name];
+      title.textContent = name === "reset" ? "\u5B50\u5546\u6237\u53F7\u91CD\u7F6E" : { "sn-authorization": "SN \u6388\u6743\u7801\u4E0B\u53D1", cups: "CUPS \u4E0A\u62A5", code: "\u7801\u724C\u5212\u8F6C", device: "\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8", "lhsd-device": "\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8", "bind-config": "\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name];
       toolSelect.value = "";
     };
     const updateOptionalSummary = () => {
@@ -3128,8 +3338,24 @@
         const merchantIds = parseMerchantKeyIds(resetInput.value);
         setBusy(true);
         setStatus(resetStatus, `\u6B63\u5728\u6279\u91CF\u914D\u7F6E ${merchantIds.length} \u4E2A\u5546\u6237\u7684 key...`);
-        await configureMerchantKeys(merchantIds, log);
-        setStatus(resetStatus, `\u5546\u6237 key \u914D\u7F6E\u5B8C\u6210\uFF0C\u5171\u6210\u529F ${merchantIds.length} \u4E2A`);
+        const results = await configureMerchantKeys(merchantIds, log);
+        setStatus(resetStatus, "");
+        for (const result of results) {
+          const item = document.createElement("div");
+          const message = document.createElement("p");
+          message.textContent = `${result.merchantId}\uFF1A${result.ok ? "\u914D\u7F6E\u6210\u529F" : `\u914D\u7F6E\u5931\u8D25\uFF1A${result.error}`}${result.queryError ? `\uFF1B\u67E5\u8BE2\u5931\u8D25\uFF1A${result.queryError}` : ""}`;
+          if (!result.ok || result.queryError) message.className = "error";
+          item.append(message);
+          if (result.key) {
+            const field = document.createElement("input");
+            field.readOnly = true;
+            field.value = result.key;
+            field.setAttribute("aria-label", `\u5546\u6237 ${result.merchantId} \u7684 key`);
+            field.addEventListener("click", () => field.select());
+            item.append(field);
+          }
+          resetStatus.append(item);
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         setStatus(resetStatus, message, true);
@@ -3345,6 +3571,7 @@
         setStatus(status, error instanceof Error ? error.message : String(error), true);
       }
     });
+    initializeSnAuthorization(root, log);
     applyPreset();
   }
   createPanel();

@@ -1,4 +1,15 @@
-import { SAAS, assertMerchantId, buildFormBody, detectHtmlError, getHtmlMessage, requestText, summarizeHtml } from './http';
+import { SAAS, assertMerchantId, buildFormBody, detectHtmlError, getHtmlMessage, requestJson, requestText, summarizeHtml } from './http';
+
+export async function queryMerchantKey(merchantId: string): Promise<string> {
+  assertMerchantId(merchantId);
+  const response = await requestJson<{ data?: unknown; respCode?: number | string; respMsg?: string }>(
+    `${SAAS}/merchant-key-info.do?method=getMerchantKeyInfo&merchantId=${encodeURIComponent(merchantId)}`,
+    { method: 'POST', timeoutMs: 15000 },
+  );
+  if (!response || String(response.respCode) !== '0') throw new Error(response?.respMsg || '商户 key 查询失败');
+  if (typeof response.data !== 'string' || !response.data.trim()) throw new Error('查询成功但未返回商户 key');
+  return response.data.trim();
+}
 
 export async function configureMerchantKey(merchantId: string): Promise<void> {
   assertMerchantId(merchantId);
