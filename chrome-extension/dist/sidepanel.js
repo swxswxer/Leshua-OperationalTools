@@ -31,9 +31,9 @@
     if (body instanceof URLSearchParams) return body.toString();
     throw new Error("\u5F53\u524D\u8DE8\u57DF\u8BF7\u6C42\u53EA\u652F\u6301\u6587\u672C\u6216\u8868\u5355\u53C2\u6570");
   }
-  function headersToRecord(headers) {
+  function headersToRecord(headers2) {
     const output = {};
-    new Headers(headers).forEach((value, key) => {
+    new Headers(headers2).forEach((value, key) => {
       output[key] = value;
     });
     return output;
@@ -90,12 +90,12 @@
     return /^\s*<!doctype html/i.test(text) || /^\s*<html[\s>]/i.test(text);
   }
   async function requestText(url, options = {}) {
-    const { accept, timeoutMs, headers, ...requestOptions } = options;
+    const { accept, timeoutMs, headers: headers2, ...requestOptions } = options;
     const resolvedUrl = assertBackendUrl(url);
     const requestHeaders = {
       Accept: accept || "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "X-Requested-With": "XMLHttpRequest",
-      ...headersToRecord(headers)
+      ...headersToRecord(headers2)
     };
     if (!isOperationsBackendPage()) {
       const response = await sendBackendRequest({
@@ -129,7 +129,7 @@
       if (timeout !== void 0) window.clearTimeout(timeout);
     }
   }
-  async function requestMultipartText(url, fields, fileField, file, timeoutMs = 3e4, headers) {
+  async function requestMultipartText(url, fields, fileField, file, timeoutMs = 3e4, headers2) {
     const response = await sendBackendRequest({
       kind: "multipart",
       url: assertBackendUrl(url),
@@ -138,7 +138,7 @@
       fileName: file.name,
       fileType: file.type || "application/octet-stream",
       fileBase64: bytesToBase64(new Uint8Array(await file.arrayBuffer())),
-      headers,
+      headers: headers2,
       timeoutMs
     });
     return response.text;
@@ -541,11 +541,11 @@
   }
   async function queryLatestReportFailure(merchantId, channel) {
     assertMerchantId(merchantId);
-    const endpoint = channel === "wechat" ? "wxsubmch" : "zfbsubmch";
+    const endpoint2 = channel === "wechat" ? "wxsubmch" : "zfbsubmch";
     const records = [];
     const end = formatDateTime(/* @__PURE__ */ new Date());
     for (let page = 1; page <= 10; page += 1) {
-      const response = await requestJson(`${SAAS}/${endpoint}.do?method=list`, {
+      const response = await requestJson(`${SAAS}/${endpoint2}.do?method=list`, {
         method: "POST",
         timeoutMs: 1e4,
         headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
@@ -708,11 +708,11 @@
     const subMchHeader = type === "alipay" ? "\u652F\u4ED8\u5B9D\u5546\u6237\u53F7" : "\u5FAE\u4FE1\u5546\u6237\u53F7";
     const table = Array.from(document2.querySelectorAll("table.tablesorter")).find((item) => normalizeText(item.textContent).includes(subMchHeader) && normalizeText(item.textContent).includes("\u901A\u77E5\u72B6\u6001"));
     if (!table) return [];
-    const headers = Array.from(table.querySelectorAll("thead th")).map((item) => normalizeText(item.textContent));
+    const headers2 = Array.from(table.querySelectorAll("thead th")).map((item) => normalizeText(item.textContent));
     return Array.from(table.querySelectorAll("tbody tr")).map((tableRow) => {
       const cells = Array.from(tableRow.querySelectorAll("td"));
       const values = {};
-      headers.forEach((header, index) => {
+      headers2.forEach((header, index) => {
         values[header] = normalizeText(cells[index]?.textContent);
       });
       const onclick = cells[0]?.querySelector('a[onclick*="getSetTradeStatusPage"]')?.getAttribute("onclick") || "";
@@ -751,11 +751,11 @@
       [isAlipay ? "nuccZfbMchId" : "nuccwxMchId"]: isAlipay ? options.nuccZfbMchId || "" : options.nuccwxMchId || "",
       pageSize: options.pageSize || "200"
     });
-    const endpoint = isAlipay ? "alipayMappingInfo.do" : "wechatMappingInfo.do";
-    const html = await requestText(`${SAAS}/${endpoint}?method=page`, {
+    const endpoint2 = isAlipay ? "alipayMappingInfo.do" : "wechatMappingInfo.do";
+    const html = await requestText(`${SAAS}/${endpoint2}?method=page`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: ORIGIN },
-      referrer: `${SAAS}/${endpoint}?method=page`,
+      referrer: `${SAAS}/${endpoint2}?method=page`,
       body
     });
     return parseMappingHtml(html, type);
@@ -805,13 +805,13 @@
     assertMerchantId(merchantId);
     if (!/^\d+$/.test(subMchId)) throw new Error(`${type === "wechat" ? "\u5FAE\u4FE1" : "\u652F\u4ED8\u5B9D"}\u5546\u6237\u53F7\u4E0D\u80FD\u4E3A\u7A7A\uFF0C\u4E14\u5FC5\u987B\u4E3A\u6570\u5B57`);
     if (!Object.keys(statusParams).length) throw new Error("\u81F3\u5C11\u9700\u8981\u4F20\u5165\u4E00\u4E2A\u901A\u9053\u72B6\u6001\u53C2\u6570");
-    const endpoint = type === "wechat" ? "wechatMappingInfo.do" : "alipayMappingInfo.do";
+    const endpoint2 = type === "wechat" ? "wechatMappingInfo.do" : "alipayMappingInfo.do";
     const parameter = type === "wechat" ? "wxSubMchId" : "zfbSubMchId";
     const body = buildFormBody({ merchantId, [parameter]: subMchId, payType, ...statusParams, submit: "\u63D0 \u4EA4" });
-    const html = await requestText(`${SAAS}/${endpoint}?method=setTradeStatus`, {
+    const html = await requestText(`${SAAS}/${endpoint2}?method=setTradeStatus`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: ORIGIN },
-      referrer: `${SAAS}/${endpoint}?method=getSetTradeStatusPage&merchantId=${encodeURIComponent(merchantId)}&${parameter}=${encodeURIComponent(subMchId)}&payType=${encodeURIComponent(payType)}`,
+      referrer: `${SAAS}/${endpoint2}?method=getSetTradeStatusPage&merchantId=${encodeURIComponent(merchantId)}&${parameter}=${encodeURIComponent(subMchId)}&payType=${encodeURIComponent(payType)}`,
       body
     });
     return parseStatusResult(html, statusParams);
@@ -1250,8 +1250,8 @@
       if (htmlError) throw new Error(htmlError);
       throw new Error(`\u65E0\u6CD5\u89E3\u6790\u6D88\u606F\u4E2D\u5FC3\u54CD\u5E94: ${summarizeHtml(html)}`);
     }
-    const headers = Array.from(table.querySelectorAll("thead th")).map((cell) => normalizeText(cell.textContent));
-    const getIndex = (name) => headers.indexOf(name);
+    const headers2 = Array.from(table.querySelectorAll("thead th")).map((cell) => normalizeText(cell.textContent));
+    const getIndex = (name) => headers2.indexOf(name);
     const indexes = {
       id: getIndex("\u6D88\u606FID"),
       subject: getIndex("\u4E3B\u9898"),
@@ -1578,15 +1578,15 @@
   function parseDeviceBindConfig(html, sn) {
     const doc = parsePage(html);
     const table = Array.from(doc.querySelectorAll("table")).find((element) => {
-      const headers2 = Array.from(element.querySelectorAll("th")).map((th) => normalizeText(th.textContent));
-      return headers2.includes("\u914D\u7F6E\u7EF4\u5EA6") && headers2.includes("\u7EF4\u5EA6\u6807\u8BC6") && headers2.includes("\u7D2F\u8BA1\u6700\u5927\u7ED1\u5B9A\u6B21\u6570");
+      const headers3 = Array.from(element.querySelectorAll("th")).map((th) => normalizeText(th.textContent));
+      return headers3.includes("\u914D\u7F6E\u7EF4\u5EA6") && headers3.includes("\u7EF4\u5EA6\u6807\u8BC6") && headers3.includes("\u7D2F\u8BA1\u6700\u5927\u7ED1\u5B9A\u6B21\u6570");
     });
     if (!table) throw new Error("\u65E0\u6CD5\u8BC6\u522B\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E\u67E5\u8BE2\u7ED3\u679C\uFF0C\u672A\u63D0\u4EA4\u4FEE\u6539\u6216\u65B0\u589E");
-    const headers = Array.from(table.querySelectorAll("th")).map((th) => normalizeText(th.textContent));
+    const headers2 = Array.from(table.querySelectorAll("th")).map((th) => normalizeText(th.textContent));
     const matches = [];
     for (const row of Array.from(table.querySelectorAll("tr"))) {
       const cells = Array.from(row.children).filter((cell) => cell.tagName === "TD");
-      const value = (name) => normalizeText(cells[headers.indexOf(name)]?.textContent);
+      const value = (name) => normalizeText(cells[headers2.indexOf(name)]?.textContent);
       if (value("\u914D\u7F6E\u7EF4\u5EA6") !== "\u4E50\u5237SN" || value("\u7EF4\u5EA6\u6807\u8BC6") !== sn) continue;
       const id = Array.from(row.querySelectorAll("[onclick]")).map(
         (element) => element.getAttribute("onclick")?.match(/\btoEdit\(['"](\d+)['"]\)/)?.[1]
@@ -2735,18 +2735,18 @@
     const doc = parseHtml(html);
     const table = doc.querySelector("table.tablesorter");
     if (!table) throw new Error("\u4EE3\u7406\u8BB0\u5F55\u67E5\u8BE2\u54CD\u5E94\u683C\u5F0F\u5F02\u5E38\uFF0C\u672A\u53D1\u9001\u6388\u6743\u7801");
-    const headers = Array.from(table.querySelectorAll("thead th")).map((el) => normalizeText(el.textContent));
+    const headers2 = Array.from(table.querySelectorAll("thead th")).map((el) => normalizeText(el.textContent));
     const required = ["\u4EE3\u7406\u5546\u7F16\u53F7", "\u90AE\u7BB1", "\u72B6\u6001", "\u64CD\u4F5C"];
-    if (required.some((name) => !headers.includes(name))) throw new Error("\u4EE3\u7406\u8BB0\u5F55\u8868\u5934\u4E0D\u5B8C\u6574\uFF0C\u672A\u53D1\u9001\u6388\u6743\u7801");
+    if (required.some((name) => !headers2.includes(name))) throw new Error("\u4EE3\u7406\u8BB0\u5F55\u8868\u5934\u4E0D\u5B8C\u6574\uFF0C\u672A\u53D1\u9001\u6388\u6743\u7801");
     const pageText = normalizeText(doc.querySelector("table.page")?.textContent);
     const pageCount = pageText.match(/共\s*(\d+)\s*页/);
     if (pageCount && Number(pageCount[1]) > 1) throw new Error("\u4EE3\u7406\u8BB0\u5F55\u6709\u591A\u9875\uFF0C\u8BF7\u5728\u540E\u53F0\u786E\u8BA4\u552F\u4E00\u6709\u6548\u63A5\u6536\u8BB0\u5F55");
     const matches = [];
     for (const tr of Array.from(table.querySelectorAll("tbody > tr"))) {
       const cells = Array.from(tr.children).filter((el) => el.tagName === "TD");
-      const value = (name) => normalizeText(cells[headers.indexOf(name)]?.textContent);
+      const value = (name) => normalizeText(cells[headers2.indexOf(name)]?.textContent);
       if (value("\u4EE3\u7406\u5546\u7F16\u53F7") !== agentId || value("\u72B6\u6001") !== "\u5DF2\u751F\u6548") continue;
-      const operation = cells[headers.indexOf("\u64CD\u4F5C")];
+      const operation = cells[headers2.indexOf("\u64CD\u4F5C")];
       const ids = Array.from(operation?.querySelectorAll("a") || []).map((link) => {
         const onclick = link.getAttribute("onclick") || "";
         const path = onclick.match(/['"]([^'"]*agentWhiteList\.do\?method=issueCode[^'"]*)['"]/);
@@ -2916,11 +2916,11 @@
     const doc = htmlDocument(html);
     const table = Array.from(doc.querySelectorAll("table")).find((table2) => Array.from(table2.querySelectorAll("th")).some((th) => th.textContent?.trim() === "\u5F53\u524D\u5904\u7406\u8282\u70B9"));
     if (!table) throw new Error("\u5DE5\u5355\u67E5\u8BE2\u8FD4\u56DE\u4E86\u672A\u77E5\u9875\u9762\uFF0C\u65E0\u6CD5\u786E\u8BA4\u67E5\u8BE2\u7ED3\u679C");
-    const headers = Array.from(table.querySelectorAll("th")).map((th) => normalizeText(th.textContent));
+    const headers2 = Array.from(table.querySelectorAll("th")).map((th) => normalizeText(th.textContent));
     const rows = [];
     table.querySelectorAll("tbody > tr").forEach((tr) => {
       const cells = Array.from(tr.children);
-      const get = (name) => normalizeText(cells[headers.indexOf(name)]?.textContent);
+      const get = (name) => normalizeText(cells[headers2.indexOf(name)]?.textContent);
       const ticketNumber = get("\u5DE5\u5355\u53F7");
       if (!/^RC\d+$/.test(ticketNumber)) return;
       rows.push({ ticketNumber, merchantId: get("\u5546\u6237\u7F16\u53F7"), merchantName: get("\u5546\u6237\u540D\u79F0"), state: get("\u5904\u7406\u72B6\u6001"), node: get("\u5F53\u524D\u5904\u7406\u8282\u70B9") });
@@ -3460,6 +3460,284 @@ ${row.node}`]) {
     get("next").addEventListener("click", () => void search(page + 1));
   }
 
+  // src/api/repay.ts
+  var headers = { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" };
+  var endpoint = (type, method) => {
+    if (type !== "T0" && type !== "T1") throw new Error("\u672A\u77E5\u7ED3\u7B97\u65B9\u5F0F");
+    return `${ORIGIN}/lspos/new${type}Repay.do?method=${method}`;
+  };
+  function repayDateRange(now = /* @__PURE__ */ new Date()) {
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const pad2 = (value) => String(value).padStart(2, "0");
+    return `${now.getFullYear()}-01-01 ~ ${tomorrow.getFullYear()}-${pad2(tomorrow.getMonth() + 1)}-${pad2(tomorrow.getDate())}`;
+  }
+  function repayQueryBody(type, merchantId, page, range) {
+    assertMerchantId(merchantId);
+    if (!Number.isSafeInteger(page) || page < 1) throw new Error("\u9875\u7801\u4E0D\u6B63\u786E");
+    const common = { FChannelUin: "", FNetUnionPayStatus: "", FAgentId: "", FMerchantId: merchantId, FBillId: "", FChannelFlowId: "", FUnionPayCode: "", FFailReason: "", FInsureState: "", changeCard: "", applySign: "", abnormalMarkers: "", appointRoute: "", pageSize: 200, pageNumber: page };
+    return buildFormBody(type === "T0" ? { ...common, FRefundFlag: "" } : { ...common, dateRange: range, updateDateRange: "", FPrebillFlag: "", FBankAccountType: "", fRecreateFlag: "", restoreSettleAuth: "" });
+  }
+  function parseRepayPage(html, type, merchantId) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    doc.querySelectorAll("script,style").forEach((node) => node.remove());
+    const body = normalizeText(doc.body.textContent);
+    if (doc.querySelector('input[type="password"]') || /登录|login/i.test(doc.title)) throw new Error("\u767B\u5F55\u5DF2\u5931\u6548\uFF0C\u8BF7\u5148\u767B\u5F55\u8FD0\u8425\u540E\u53F0");
+    if (/没有该项操作权限|权限不足|无权访问/.test(body)) throw new Error("\u5F53\u524D\u8D26\u53F7\u6CA1\u6709\u67E5\u8BE2\u6743\u9650");
+    const required = ["\u7ED3\u7B97\u65E5\u671F", "\u5546\u6237\u53F7", "\u6253\u6B3E\u5355\u53F7", "\u5931\u8D25\u539F\u56E0"];
+    const table = Array.from(doc.querySelectorAll("table")).find((table2) => {
+      const names2 = Array.from(table2.querySelectorAll("th")).map((th) => normalizeText(th.textContent));
+      return required.every((name) => names2.includes(name));
+    });
+    if (!table) throw new Error("\u672A\u8BC6\u522B\u5230\u91CD\u51FA\u6253\u6B3E\u5355\u5217\u8868\uFF0C\u8BF7\u5230\u540E\u53F0\u6838\u5BF9");
+    const names = Array.from(table.querySelectorAll("th")).map((th) => normalizeText(th.textContent));
+    const rows = [];
+    table.querySelectorAll("tbody > tr").forEach((tr) => {
+      const cells = Array.from(tr.children);
+      if (cells.length !== names.length) return;
+      const get = (name) => normalizeText(cells[names.indexOf(name)]?.textContent);
+      const billId = get("\u6253\u6B3E\u5355\u53F7");
+      if (!billId) return;
+      if (get("\u5546\u6237\u53F7") !== merchantId) throw new Error("\u540E\u53F0\u8FD4\u56DE\u4E86\u5176\u4ED6\u5546\u6237\u7684\u8BB0\u5F55\uFF0C\u5DF2\u505C\u6B62\u5904\u7406");
+      const checkbox = tr.querySelector('input[name="select_item"]');
+      const selectable = !!checkbox && !checkbox.disabled && checkbox.value.split("_")[0] === billId && /^\d+$/.test(billId);
+      rows.push({ type, billId, merchantId, date: get("\u7ED3\u7B97\u65E5\u671F"), reason: get("\u5931\u8D25\u539F\u56E0"), selectable });
+    });
+    const pagination = body.match(/第\s*(\d+)\s*页[，,]?\s*共\s*(\d+)\s*页/);
+    if (!pagination) throw new Error("\u65E0\u6CD5\u786E\u8BA4\u6253\u6B3E\u5355\u5206\u9875\u4FE1\u606F\uFF0C\u8BF7\u5230\u540E\u53F0\u6838\u5BF9");
+    return { rows, page: Number(pagination[1]), pages: Number(pagination[2]) };
+  }
+  async function queryRepayPage(type, merchantId, page, range) {
+    return parseRepayPage(await requestText(endpoint(type, type === "T0" ? "t0RepayList" : "t1RepayList"), { method: "POST", headers, body: repayQueryBody(type, merchantId, page, range) }), type, merchantId);
+  }
+  function parseRepayResponse(text) {
+    let data;
+    try {
+      data = JSON.parse(text);
+      if (typeof data === "string") data = JSON.parse(data);
+    } catch {
+      throw new Error("\u540E\u53F0\u8FD4\u56DE\u975E\u9884\u671F\u54CD\u5E94\uFF0C\u7533\u8BF7\u7ED3\u679C\u5F85\u786E\u8BA4\uFF0C\u8BF7\u5148\u5230\u540E\u53F0\u6838\u5BF9");
+    }
+    if (!data || typeof data !== "object" || !("code" in data)) throw new Error("\u540E\u53F0\u672A\u8FD4\u56DE\u7ED3\u679C\u7801\uFF0C\u7533\u8BF7\u7ED3\u679C\u5F85\u786E\u8BA4");
+    const result = data;
+    return { accepted: result.code === "0000", message: typeof result.msg === "string" ? result.msg : "\u540E\u53F0\u672A\u63D0\u4F9B\u539F\u56E0" };
+  }
+  async function applyRepay(type, billIds) {
+    if (!billIds.length || billIds.some((id) => !/^\d+$/.test(id)) || new Set(billIds).size !== billIds.length) throw new Error("\u6253\u6B3E\u5355\u53F7\u4E3A\u7A7A\u3001\u91CD\u590D\u6216\u683C\u5F0F\u4E0D\u6B63\u786E");
+    return parseRepayResponse(await requestText(endpoint(type, "applyAutoRepay"), { method: "POST", headers, body: buildFormBody({ ids: billIds.join(",") }) }));
+  }
+
+  // src/tools/repay.ts
+  var repayKey = (row) => `${row.type}:${row.billId}`;
+  async function queryRepayChannel(type, merchantId, range) {
+    const rows = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (let page = 1; page <= 100; page++) {
+      const result = await queryRepayPage(type, merchantId, page, range);
+      if (result.page !== page && !(page === 1 && result.pages === 0 && !result.rows.length)) throw new Error("\u540E\u53F0\u5206\u9875\u4E0E\u8BF7\u6C42\u4E0D\u4E00\u81F4\uFF0C\u5DF2\u505C\u6B62\u67E5\u8BE2");
+      for (const row of result.rows) {
+        if (seen.has(row.billId)) throw new Error("\u540E\u53F0\u5206\u9875\u51FA\u73B0\u91CD\u590D\u6253\u6B3E\u5355\uFF0C\u8BF7\u91CD\u65B0\u67E5\u8BE2");
+        seen.add(row.billId);
+        rows.push(row);
+      }
+      if (page >= result.pages) return rows;
+      if (!result.rows.length) throw new Error("\u540E\u53F0\u5206\u9875\u6570\u636E\u4E0D\u5B8C\u6574\uFF0C\u8BF7\u91CD\u65B0\u67E5\u8BE2");
+    }
+    throw new Error("\u8BB0\u5F55\u8D85\u8FC7 100 \u9875\uFF0C\u8BF7\u5728\u540E\u53F0\u7F29\u5C0F\u67E5\u8BE2\u8303\u56F4");
+  }
+  async function searchRepay(merchantId, range = repayDateRange()) {
+    const id = merchantId.trim();
+    assertMerchantId(id);
+    const results = await Promise.allSettled(["T0", "T1"].map((type) => queryRepayChannel(type, id, range)));
+    const rows = [];
+    const errors = [];
+    results.forEach((result, i) => {
+      if (result.status === "fulfilled") rows.push(...result.value);
+      else errors.push(`${i === 0 ? "T0" : "T1"} \u67E5\u8BE2\u5931\u8D25\uFF1A${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+    });
+    return { rows, errors, range, merchantId: id };
+  }
+  async function submitSelectedRepay(rows, merchantId, onResult = () => {
+  }) {
+    assertMerchantId(merchantId);
+    if (!rows.length || rows.some((row) => !row.selectable || row.merchantId !== merchantId || !["T0", "T1"].includes(row.type) || !/^\d+$/.test(row.billId))) throw new Error("\u6240\u9009\u8BB0\u5F55\u4E0D\u5C5E\u4E8E\u5F53\u524D\u5546\u6237\u6216\u4E0D\u53EF\u7533\u8BF7\uFF0C\u8BF7\u91CD\u65B0\u67E5\u8BE2");
+    if (new Set(rows.map(repayKey)).size !== rows.length) throw new Error("\u5B58\u5728\u91CD\u590D\u6253\u6B3E\u5355");
+    const results = [];
+    for (const type of ["T0", "T1"]) {
+      const ids = rows.filter((row) => row.type === type).map((row) => row.billId);
+      if (!ids.length) continue;
+      let result;
+      try {
+        const response = await applyRepay(type, ids);
+        result = { type, ids, state: response.accepted ? "accepted" : "failed", message: response.accepted ? "\u7533\u8BF7\u5DF2\u53D7\u7406\uFF0C\u7B49\u5F85\u540E\u53F0\u5904\u7406" : `\u7533\u8BF7\u5931\u8D25\uFF1A${response.message}` };
+      } catch (error) {
+        result = { type, ids, state: "unknown", message: `\u7533\u8BF7\u7ED3\u679C\u5F85\u786E\u8BA4\uFF1A${error instanceof Error ? error.message : String(error)}\uFF1B\u8BF7\u5230\u540E\u53F0\u6838\u5BF9\uFF0C\u52FF\u91CD\u590D\u7533\u8BF7` };
+      }
+      results.push(result);
+      onResult(result);
+    }
+    return results;
+  }
+
+  // src/sidepanel/repay.ts
+  var repayView = `<section id="syt-view-repay" class="view">
+  <form id="repay-form"><label for="repay-merchant">\u4E50\u5237\u5546\u6237\u53F7</label><input id="repay-merchant" inputmode="numeric" autocomplete="off" required placeholder="10 \u4F4D\u4E50\u5237\u5546\u6237\u53F7"><button id="repay-search" type="submit" class="primary">\u67E5\u8BE2\u6253\u6B3E\u5355</button></form>
+  <p id="repay-range" class="status"></p>
+  <label class="repay-select-all"><input id="repay-all" type="checkbox" disabled>\u5168\u9009<span id="repay-count"></span></label>
+  <div class="repay-table-wrap"><table class="repay-table"><thead><tr><th>\u7ED3\u7B97\u65B9\u5F0F</th><th>\u65F6\u95F4</th><th>\u5546\u6237\u53F7</th><th>\u5931\u8D25\u539F\u56E0</th></tr></thead><tbody id="repay-rows"></tbody></table></div>
+  <button id="repay-apply" type="button" class="primary" disabled>\u7533\u8BF7\u91CD\u51FA</button>
+  <div id="repay-confirm" hidden><p id="repay-summary"></p><button id="repay-cancel" type="button">\u53D6\u6D88</button><button id="repay-submit" type="button" class="primary">\u786E\u8BA4\u7533\u8BF7</button></div>
+  <div id="repay-status" class="status" role="status" aria-live="polite"></div>
+</section>`;
+  function initializeRepay(root, log) {
+    const el = (id) => root.querySelector(`#repay-${id}`);
+    let rows = [];
+    let merchant = "";
+    let busy = false;
+    let confirming = false;
+    const selected = /* @__PURE__ */ new Set();
+    const outcomes = /* @__PURE__ */ new Map();
+    const eligible = (row) => row.selectable && !outcomes.has(repayKey(row));
+    const status = (message, error = false) => {
+      el("status").textContent = message;
+      el("status").className = `status${error ? " error" : ""}`;
+      log(`\u91CD\u51FA\u6253\u6B3E\u5355\uFF1A${message}`, error);
+    };
+    const update = () => {
+      const available = rows.filter(eligible);
+      el("merchant").disabled = busy || confirming;
+      el("search").disabled = busy || confirming;
+      const all = el("all");
+      all.disabled = busy || confirming || !available.length;
+      all.checked = !!available.length && selected.size === available.length;
+      all.indeterminate = selected.size > 0 && selected.size < available.length;
+      el("count").textContent = `\u5DF2\u9009 ${selected.size} / ${available.length} \u7B14`;
+      el("apply").disabled = busy || confirming || !selected.size;
+      el("submit").disabled = busy;
+      el("cancel").disabled = busy;
+      el("confirm").hidden = !confirming;
+      el("rows").querySelectorAll('input[type="checkbox"]').forEach((box) => {
+        const row = rows.find((row2) => repayKey(row2) === box.value);
+        box.disabled = busy || confirming || !eligible(row);
+        box.checked = selected.has(box.value);
+      });
+    };
+    const render = () => {
+      el("rows").replaceChildren();
+      for (const row of rows) {
+        const tr = document.createElement("tr");
+        const td2 = document.createElement("td");
+        const label = document.createElement("label");
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.value = repayKey(row);
+        box.setAttribute("aria-label", `\u9009\u62E9 ${row.type} \u6253\u6B3E\u5355 ${row.billId}`);
+        box.addEventListener("change", () => {
+          if (box.checked) selected.add(box.value);
+          else selected.delete(box.value);
+          update();
+        });
+        label.append(box, row.type);
+        td2.append(label);
+        tr.append(td2);
+        for (const text of [row.date, row.merchantId]) {
+          const cell = document.createElement("td");
+          cell.textContent = text;
+          tr.append(cell);
+        }
+        const reason = document.createElement("td");
+        reason.textContent = row.reason || "\u2014";
+        const outcome = outcomes.get(repayKey(row));
+        if (outcome || !row.selectable) {
+          const note = document.createElement("p");
+          note.textContent = outcome?.message || "\u540E\u53F0\u8BB0\u5F55\u4E0D\u53EF\u52FE\u9009";
+          note.className = outcome?.state === "accepted" ? "repay-accepted" : "error";
+          reason.append(note);
+        }
+        tr.title = `\u6253\u6B3E\u5355\u53F7\uFF1A${row.billId}`;
+        tr.append(reason);
+        el("rows").append(tr);
+      }
+      update();
+    };
+    el("merchant").addEventListener("input", () => {
+      rows = [];
+      merchant = "";
+      selected.clear();
+      el("status").textContent = "";
+      el("range").textContent = "";
+      render();
+    });
+    el("form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (busy || confirming) return;
+      busy = true;
+      rows = [];
+      selected.clear();
+      merchant = "";
+      render();
+      const range = repayDateRange();
+      el("range").textContent = `T0\uFF1A\u4E0D\u9650\u65F6\u95F4\uFF1BT1\uFF1A${range}`;
+      status("\u6B63\u5728\u67E5\u8BE2 T0 / T1 \u6253\u6B3E\u5355...");
+      try {
+        const result = await searchRepay(el("merchant").value, range);
+        rows = result.rows;
+        merchant = result.merchantId;
+        for (const [key, outcome] of outcomes) if (outcome.state === "failed") outcomes.delete(key);
+        status(`${rows.length ? `\u67E5\u8BE2\u5230 ${rows.length} \u7B14\u6253\u6B3E\u5355` : "\u672A\u67E5\u8BE2\u5230\u6253\u6B3E\u5355"}${result.errors.length ? `\uFF1B${result.errors.join("\uFF1B")}` : ""}`, result.errors.length > 0);
+      } catch (error) {
+        status(error instanceof Error ? error.message : String(error), true);
+      } finally {
+        busy = false;
+        render();
+      }
+    });
+    el("all").addEventListener("change", () => {
+      selected.clear();
+      if (el("all").checked) rows.filter(eligible).forEach((row) => selected.add(repayKey(row)));
+      update();
+    });
+    el("apply").addEventListener("click", () => {
+      if (busy || !selected.size) return;
+      confirming = true;
+      const chosen = rows.filter((row) => selected.has(repayKey(row)));
+      el("summary").textContent = `\u786E\u8BA4\u5BF9\u5546\u6237 ${merchant} \u7684 ${chosen.length} \u7B14\u6253\u6B3E\u5355\u7533\u8BF7\u91CD\u51FA\uFF1FT0\uFF1A${chosen.filter((row) => row.type === "T0").length} \u7B14\uFF0CT1\uFF1A${chosen.filter((row) => row.type === "T1").length} \u7B14\u3002`;
+      update();
+    });
+    el("cancel").addEventListener("click", () => {
+      if (!busy) {
+        confirming = false;
+        update();
+      }
+    });
+    el("submit").addEventListener("click", async () => {
+      if (busy || !confirming) return;
+      const chosen = rows.filter((row) => selected.has(repayKey(row)) && eligible(row));
+      busy = true;
+      update();
+      status("\u6B63\u5728\u63D0\u4EA4\u91CD\u51FA\u7533\u8BF7...");
+      try {
+        await submitSelectedRepay(chosen, merchant, (result) => {
+          for (const id of result.ids) {
+            const key = `${result.type}:${id}`;
+            outcomes.set(key, { state: result.state, message: result.message });
+            selected.delete(key);
+          }
+          log(`\u91CD\u51FA\u6253\u6B3E\u5355 ${result.type} ${result.ids.length} \u7B14\uFF1A${result.message}`, result.state !== "accepted");
+          render();
+        });
+        const accepted = chosen.filter((row) => outcomes.get(repayKey(row))?.state === "accepted").length;
+        status(`\u672C\u6B21 ${chosen.length} \u7B14\uFF0C\u5DF2\u53D7\u7406 ${accepted} \u7B14${accepted < chosen.length ? "\uFF1B\u5176\u4F59\u8BF7\u67E5\u770B\u8868\u683C\u63D0\u793A" : "\uFF0C\u7B49\u5F85\u540E\u53F0\u5904\u7406\uFF08\u4E0D\u4EE3\u8868\u6253\u6B3E\u5B8C\u6210\uFF09"}`, accepted < chosen.length);
+      } catch (error) {
+        status(error instanceof Error ? error.message : String(error), true);
+      } finally {
+        busy = false;
+        confirming = false;
+        render();
+      }
+    });
+  }
+
   // src/api/device-transfer.ts
   var ENDPOINT3 = "/base-business/pinpad/newTerminal.do";
   var LHSD_TRANSFER_ENDPOINT = "/uts_platform/machine/manager/machineChangeAgent.do";
@@ -3665,6 +3943,7 @@ ${row.node}`]) {
         ${snAuthorizationView}
         ${ticketReviewView}
         ${riskMerchantTicketsView}
+        ${repayView}
         <section id="syt-view-cups" class="view">
           <label for="syt-cups-merchant">\u4E50\u5237\u5546\u6237\u53F7</label><input id="syt-cups-merchant" inputmode="numeric" autocomplete="off" placeholder="10 \u4F4D\u4E50\u5237\u5546\u6237\u53F7">
           <button id="syt-run-cups" class="primary" type="button">\u63D0\u4EA4\u4E0A\u62A5\u7533\u8BF7</button><div id="syt-cups-status" class="status" role="status" aria-live="polite"></div>
@@ -3693,6 +3972,7 @@ ${row.node}`]) {
     toolSelect.add(new Option("SN \u6388\u6743\u7801\u4E0B\u53D1", "sn-authorization"));
     toolSelect.add(new Option("\u5DE5\u5355\u5BA1\u6838", "ticket-review"));
     toolSelect.add(new Option("\u98CE\u9669\u5546\u6237\u5DE5\u5355\u67E5\u8BE2", "risk-tickets"));
+    toolSelect.add(new Option("\u91CD\u51FA\u6253\u6B3E\u5355", "repay"));
     const clearMerchant = byId(root, "syt-clear-merchant");
     const merchantHint = byId(root, "syt-merchant-hint");
     const optionalConfig = byId(root, "syt-optional-config");
@@ -3774,6 +4054,7 @@ ${row.node}`]) {
     };
     const ticketReview = initializeTicketReview(root, log);
     initializeRiskMerchantTickets(root, log);
+    initializeRepay(root, log);
     const showView = async (name) => {
       if (!await ticketReview.leave()) {
         toolSelect.value = "";
@@ -3781,7 +4062,7 @@ ${row.node}`]) {
       }
       root.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === `syt-view-${name}`));
       backButton.classList.toggle("visible", name !== "reset");
-      title.textContent = name === "reset" ? "\u5B50\u5546\u6237\u53F7\u91CD\u7F6E" : { "risk-tickets": "\u98CE\u9669\u5546\u6237\u5DE5\u5355\u67E5\u8BE2", "ticket-review": "\u5DE5\u5355\u5BA1\u6838", "sn-authorization": "SN \u6388\u6743\u7801\u4E0B\u53D1", cups: "CUPS \u4E0A\u62A5", code: "\u7801\u724C\u5212\u8F6C", device: "\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8", "lhsd-device": "\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8", "bind-config": "\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name];
+      title.textContent = name === "reset" ? "\u5B50\u5546\u6237\u53F7\u91CD\u7F6E" : { repay: "\u91CD\u51FA\u6253\u6B3E\u5355", "risk-tickets": "\u98CE\u9669\u5546\u6237\u5DE5\u5355\u67E5\u8BE2", "ticket-review": "\u5DE5\u5355\u5BA1\u6838", "sn-authorization": "SN \u6388\u6743\u7801\u4E0B\u53D1", cups: "CUPS \u4E0A\u62A5", code: "\u7801\u724C\u5212\u8F6C", device: "\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8", "lhsd-device": "\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8", "bind-config": "\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name];
       toolSelect.value = "";
     };
     const updateOptionalSummary = () => {

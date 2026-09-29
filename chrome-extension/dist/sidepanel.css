@@ -130,3 +130,19 @@ h2 { font-size: calc(var(--font-title) - 1px); font-weight: 600; }
 .risk-handling-link { display: block; margin-top: 14px; overflow-wrap: anywhere; color: #2563eb; }
 .risk-handling-content { width: 100%; margin-top: 10px; padding: 8px; font: inherit; border: 1px solid #d8dee8; border-radius: 6px; resize: vertical; }
 .risk-handling-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+#repay-search, #repay-apply { width: 100%; margin-top: 14px; }
+.repay-select-all { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.repay-select-all input, .repay-table input { width: 16px; height: 16px; margin: 0; flex-shrink: 0; }
+#repay-count { margin-left: auto; font-size: var(--font-small); color: #69768a; }
+.repay-table-wrap { overflow-x: auto; }
+.repay-table { width: 100%; min-width: 280px; table-layout: fixed; border-collapse: collapse; font-size: var(--font-small); }
+.repay-table th, .repay-table td { text-align: left; vertical-align: top; padding: 10px 4px; border-bottom: 1px solid #e5e9f0; overflow-wrap: anywhere; }
+.repay-table th:first-child { width: 62px; }
+.repay-table th:nth-child(2) { width: 72px; }
+.repay-table th:nth-child(3) { width: 76px; }
+.repay-table label { display: flex; align-items: center; gap: 4px; margin: 0; }
+.repay-table p { margin-top: 6px; }
+.repay-accepted { color: #15803d; }
+#repay-confirm { border-top: 1px solid #d8dee8; margin-top: 16px; padding-top: 12px; }
+#repay-confirm[hidden] { display: none; }
+#repay-summary { margin-bottom: 12px; overflow-wrap: anywhere; }
