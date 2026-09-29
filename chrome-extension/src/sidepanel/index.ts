@@ -19,6 +19,7 @@ import { saveDeviceBindConfig } from '../tools/device-bind-config';
 import { reportCups } from '../tools/cups-report';
 import { initializeSnAuthorization, snAuthorizationView } from './sn-authorization';
 import { initializeTicketReview, ticketReviewView } from './ticket-review';
+import { initializeRiskMerchantTickets, riskMerchantTicketsView } from './risk-merchant-tickets';
 import {
   queryNewDeviceAgent,
   queryOldDeviceAgent,
@@ -84,6 +85,7 @@ function createPanel(): void {
         </section>
         ${snAuthorizationView}
         ${ticketReviewView}
+        ${riskMerchantTicketsView}
         <section id="syt-view-cups" class="view">
           <label for="syt-cups-merchant">乐刷商户号</label><input id="syt-cups-merchant" inputmode="numeric" autocomplete="off" placeholder="10 位乐刷商户号">
           <button id="syt-run-cups" class="primary" type="button">提交上报申请</button><div id="syt-cups-status" class="status" role="status" aria-live="polite"></div>
@@ -112,6 +114,7 @@ function createPanel(): void {
   toolSelect.add(new Option('CUPS 上报', 'cups'));
   toolSelect.add(new Option('SN 授权码下发', 'sn-authorization'));
   toolSelect.add(new Option('工单审核', 'ticket-review'));
+  toolSelect.add(new Option('风险商户工单查询', 'risk-tickets'));
   const clearMerchant = byId<HTMLButtonElement>(root, 'syt-clear-merchant');
   const merchantHint = byId<HTMLElement>(root, 'syt-merchant-hint');
   const optionalConfig = byId<HTMLDetailsElement>(root, 'syt-optional-config');
@@ -188,11 +191,12 @@ function createPanel(): void {
     }
   };
   const ticketReview = initializeTicketReview(root, log);
+  initializeRiskMerchantTickets(root, log);
   const showView = async (name: string) => {
     if (!await ticketReview.leave()) { toolSelect.value = ''; return; }
     root.querySelectorAll<HTMLElement>('.view').forEach((view) => view.classList.toggle('active', view.id === `syt-view-${name}`));
     backButton.classList.toggle('visible', name !== 'reset');
-    title.textContent = name === 'reset' ? '子商户号重置' : ({ 'ticket-review': '工单审核', 'sn-authorization': 'SN 授权码下发', cups: 'CUPS 上报', code: '码牌划转', device: '收银通机具划拨', 'lhsd-device': '联合收单机具划拨', 'bind-config': '设备换绑配置', whitelist: '防切户白名单' } as Record<string, string>)[name];
+    title.textContent = name === 'reset' ? '子商户号重置' : ({ 'risk-tickets': '风险商户工单查询', 'ticket-review': '工单审核', 'sn-authorization': 'SN 授权码下发', cups: 'CUPS 上报', code: '码牌划转', device: '收银通机具划拨', 'lhsd-device': '联合收单机具划拨', 'bind-config': '设备换绑配置', whitelist: '防切户白名单' } as Record<string, string>)[name];
     toolSelect.value = '';
   };
   const updateOptionalSummary = () => {

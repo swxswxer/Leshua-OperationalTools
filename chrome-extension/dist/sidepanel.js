@@ -3246,6 +3246,143 @@ ${row.node}`]) {
     } };
   }
 
+  // src/api/risk-merchant-tickets.ts
+  function parseRiskTickets(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    doc.querySelectorAll("script,style").forEach((node) => node.remove());
+    const body = normalizeText(doc.body.textContent);
+    if (doc.querySelector('input[type="password"]') || /登录|login/i.test(doc.title)) throw new Error("\u767B\u5F55\u5DF2\u5931\u6548\uFF0C\u8BF7\u5148\u767B\u5F55\u8FD0\u8425\u540E\u53F0");
+    if (/没有该项操作权限|权限不足|无权访问/.test(body)) throw new Error("\u5F53\u524D\u8D26\u53F7\u6CA1\u6709\u67E5\u8BE2\u6743\u9650");
+    const required = ["\u521B\u5EFA\u65F6\u95F4", "\u8BC1\u4EF6\u7C7B\u578B", "\u8BC1\u4EF6\u53F7\u7801", "\u5546\u6237\u7F16\u53F7", "\u5DE5\u5355\u53F7", "\u5F53\u524D\u5904\u7406\u8282\u70B9", "\u540D\u5355\u72B6\u6001", "\u64CD\u4F5C\u4EBA"];
+    const table = Array.from(doc.querySelectorAll("table")).find((table2) => {
+      const headings2 = Array.from(table2.querySelectorAll("th")).map((th) => normalizeText(th.textContent));
+      return required.every((name) => headings2.includes(name));
+    });
+    if (!table) throw new Error("\u540E\u53F0\u8FD4\u56DE\u672A\u77E5\u9875\u9762\uFF0C\u65E0\u6CD5\u8BFB\u53D6\u98CE\u9669\u5546\u6237\u5DE5\u5355");
+    const headings = Array.from(table.querySelectorAll("th")).map((th) => normalizeText(th.textContent));
+    const rows = [];
+    table.querySelectorAll("tbody > tr").forEach((tr) => {
+      const cells = Array.from(tr.children);
+      if (cells.length !== headings.length) return;
+      const get = (name) => normalizeText(cells[headings.indexOf(name)]?.textContent);
+      rows.push({ created: get("\u521B\u5EFA\u65F6\u95F4"), cardType: get("\u8BC1\u4EF6\u7C7B\u578B"), maskedNumber: get("\u8BC1\u4EF6\u53F7\u7801"), merchantId: get("\u5546\u6237\u7F16\u53F7"), ticketNumber: get("\u5DE5\u5355\u53F7"), node: get("\u5F53\u524D\u5904\u7406\u8282\u70B9"), status: get("\u540D\u5355\u72B6\u6001"), operator: get("\u64CD\u4F5C\u4EBA") });
+    });
+    const pagination = body.match(/第\s*(\d+)\s*页[，,]?\s*共\s*(\d+)\s*页/);
+    const total = body.match(/共\s*(\d+)\s*条记录/);
+    return { rows, page: pagination ? Number(pagination[1]) : 1, pages: pagination ? Number(pagination[2]) : 1, total: total ? Number(total[1]) : rows.length };
+  }
+  async function queryRiskTickets(cardType, cardNumber, page) {
+    return parseRiskTickets(await requestText(`${ORIGIN}/lspos/merchantCardBlackList.do?method=list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+      body: buildFormBody({ dateRange: "", cardType, cardNumber, merchantId: "", ticketNumber: "", status: "", upcomingProcessName: "", pageSize: 20, pageNumber: page })
+    }));
+  }
+
+  // src/tools/risk-merchant-tickets.ts
+  function searchRiskMerchantTickets(type, number, page = 1) {
+    if (!["1", "2", "3"].includes(type)) throw new Error("\u8BF7\u9009\u62E9\u8EAB\u4EFD\u8BC1\u3001\u8425\u4E1A\u6267\u7167\u6216\u94F6\u884C\u5361\u53F7");
+    const value = number.trim();
+    if (!value) throw new Error("\u8BF7\u8F93\u5165\u67E5\u8BE2\u53F7\u7801");
+    if (!/^[a-zA-Z0-9]+$/.test(value)) throw new Error("\u67E5\u8BE2\u53F7\u7801\u53EA\u80FD\u5305\u542B\u6570\u5B57\u6216\u82F1\u6587\u5B57\u6BCD");
+    if (!Number.isSafeInteger(page) || page < 1) throw new Error("\u67E5\u8BE2\u9875\u7801\u4E0D\u6B63\u786E");
+    return queryRiskTickets(type, value, page);
+  }
+
+  // src/sidepanel/risk-merchant-tickets.ts
+  var riskMerchantTicketsView = `<section id="syt-view-risk-tickets" class="view">
+  <form id="risk-search-form">
+    <label for="risk-card-type">\u67E5\u8BE2\u7C7B\u578B</label><select id="risk-card-type"><option value="1">\u8EAB\u4EFD\u8BC1</option><option value="3">\u8425\u4E1A\u6267\u7167</option><option value="2">\u94F6\u884C\u5361\u53F7</option></select>
+    <label for="risk-card-number" id="risk-number-label">\u8EAB\u4EFD\u8BC1\u53F7</label><input id="risk-card-number" autocomplete="off" spellcheck="false" required>
+    <button id="risk-search" class="primary" type="submit">\u67E5\u8BE2\u98CE\u9669\u5546\u6237\u5DE5\u5355</button>
+  </form>
+  <div id="risk-status" class="status" role="status" aria-live="polite"></div>
+  <div id="risk-results"></div>
+  <div class="ticket-pagination"><button id="risk-prev" type="button" disabled>\u4E0A\u4E00\u9875</button><span id="risk-page"></span><button id="risk-next" type="button" disabled>\u4E0B\u4E00\u9875</button></div>
+</section>`;
+  function initializeRiskMerchantTickets(root, log) {
+    const get = (id) => root.querySelector(`#risk-${id}`);
+    const type = get("card-type");
+    const input = get("card-number");
+    let busy = false;
+    let page = 1;
+    let pages = 0;
+    let query;
+    const controls = () => {
+      type.disabled = input.disabled = get("search").disabled = busy;
+      get("prev").disabled = busy || page <= 1 || !query;
+      get("next").disabled = busy || page >= pages || !query;
+    };
+    const clear = () => {
+      query = void 0;
+      pages = 0;
+      page = 1;
+      get("results").replaceChildren();
+      get("status").textContent = "";
+      get("page").textContent = "";
+      controls();
+    };
+    type.addEventListener("change", () => {
+      clear();
+      get("number-label").textContent = { "1": "\u8EAB\u4EFD\u8BC1\u53F7", "2": "\u94F6\u884C\u5361\u53F7", "3": "\u8425\u4E1A\u6267\u7167\u53F7" }[type.value];
+    });
+    input.addEventListener("input", clear);
+    const search = async (target, fresh = false) => {
+      if (busy) return;
+      const current = fresh ? { type: type.value, number: input.value } : query;
+      if (!current) return;
+      busy = true;
+      controls();
+      get("results").replaceChildren();
+      get("page").textContent = "";
+      get("status").textContent = "\u6B63\u5728\u67E5\u8BE2\u98CE\u9669\u5546\u6237\u5DE5\u5355...";
+      get("status").className = "status";
+      try {
+        const result = await searchRiskMerchantTickets(current.type, current.number, target);
+        query = current;
+        page = result.page;
+        pages = result.pages;
+        for (const row of result.rows) {
+          const section = document.createElement("article");
+          section.className = "risk-ticket-row";
+          const heading = document.createElement("h2");
+          heading.textContent = row.ticketNumber || "\u672A\u5173\u8054\u5DE5\u5355";
+          section.append(heading);
+          const dl = document.createElement("dl");
+          dl.className = "ticket-detail";
+          for (const [label, text] of [["\u5546\u6237\u53F7", row.merchantId], ["\u5F53\u524D\u8282\u70B9", row.node], ["\u540D\u5355\u72B6\u6001", row.status], ["\u8BC1\u4EF6\u7C7B\u578B", row.cardType], ["\u8BC1\u4EF6\u53F7\u7801", row.maskedNumber], ["\u521B\u5EFA\u65F6\u95F4", row.created], ["\u64CD\u4F5C\u4EBA", row.operator]]) {
+            const dt = document.createElement("dt");
+            dt.textContent = label;
+            const dd = document.createElement("dd");
+            dd.textContent = text || "\u2014";
+            dl.append(dt, dd);
+          }
+          section.append(dl);
+          get("results").append(section);
+        }
+        get("page").textContent = `\u7B2C ${page} / ${Math.max(pages, 1)} \u9875`;
+        const message = result.rows.length ? `\u67E5\u8BE2\u5B8C\u6210\uFF0C\u5171 ${result.total} \u6761\u8BB0\u5F55` : "\u672A\u67E5\u8BE2\u5230\u5339\u914D\u8BB0\u5F55";
+        get("status").textContent = message;
+        log(`\u98CE\u9669\u5546\u6237\u5DE5\u5355\uFF1A${message}`);
+      } catch (error) {
+        query = void 0;
+        pages = 0;
+        get("status").textContent = error instanceof Error ? error.message : "\u67E5\u8BE2\u5931\u8D25";
+        get("status").className = "status error";
+        log("\u98CE\u9669\u5546\u6237\u5DE5\u5355\u67E5\u8BE2\u5931\u8D25\uFF0C\u8BF7\u67E5\u770B\u67E5\u8BE2\u9875\u9762\u63D0\u793A", true);
+      } finally {
+        busy = false;
+        controls();
+      }
+    };
+    get("search-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      void search(1, true);
+    });
+    get("prev").addEventListener("click", () => void search(page - 1));
+    get("next").addEventListener("click", () => void search(page + 1));
+  }
+
   // src/api/device-transfer.ts
   var ENDPOINT3 = "/base-business/pinpad/newTerminal.do";
   var LHSD_TRANSFER_ENDPOINT = "/uts_platform/machine/manager/machineChangeAgent.do";
@@ -3450,6 +3587,7 @@ ${row.node}`]) {
         </section>
         ${snAuthorizationView}
         ${ticketReviewView}
+        ${riskMerchantTicketsView}
         <section id="syt-view-cups" class="view">
           <label for="syt-cups-merchant">\u4E50\u5237\u5546\u6237\u53F7</label><input id="syt-cups-merchant" inputmode="numeric" autocomplete="off" placeholder="10 \u4F4D\u4E50\u5237\u5546\u6237\u53F7">
           <button id="syt-run-cups" class="primary" type="button">\u63D0\u4EA4\u4E0A\u62A5\u7533\u8BF7</button><div id="syt-cups-status" class="status" role="status" aria-live="polite"></div>
@@ -3477,6 +3615,7 @@ ${row.node}`]) {
     toolSelect.add(new Option("CUPS \u4E0A\u62A5", "cups"));
     toolSelect.add(new Option("SN \u6388\u6743\u7801\u4E0B\u53D1", "sn-authorization"));
     toolSelect.add(new Option("\u5DE5\u5355\u5BA1\u6838", "ticket-review"));
+    toolSelect.add(new Option("\u98CE\u9669\u5546\u6237\u5DE5\u5355\u67E5\u8BE2", "risk-tickets"));
     const clearMerchant = byId(root, "syt-clear-merchant");
     const merchantHint = byId(root, "syt-merchant-hint");
     const optionalConfig = byId(root, "syt-optional-config");
@@ -3557,6 +3696,7 @@ ${row.node}`]) {
       }
     };
     const ticketReview = initializeTicketReview(root, log);
+    initializeRiskMerchantTickets(root, log);
     const showView = async (name) => {
       if (!await ticketReview.leave()) {
         toolSelect.value = "";
@@ -3564,7 +3704,7 @@ ${row.node}`]) {
       }
       root.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === `syt-view-${name}`));
       backButton.classList.toggle("visible", name !== "reset");
-      title.textContent = name === "reset" ? "\u5B50\u5546\u6237\u53F7\u91CD\u7F6E" : { "ticket-review": "\u5DE5\u5355\u5BA1\u6838", "sn-authorization": "SN \u6388\u6743\u7801\u4E0B\u53D1", cups: "CUPS \u4E0A\u62A5", code: "\u7801\u724C\u5212\u8F6C", device: "\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8", "lhsd-device": "\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8", "bind-config": "\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name];
+      title.textContent = name === "reset" ? "\u5B50\u5546\u6237\u53F7\u91CD\u7F6E" : { "risk-tickets": "\u98CE\u9669\u5546\u6237\u5DE5\u5355\u67E5\u8BE2", "ticket-review": "\u5DE5\u5355\u5BA1\u6838", "sn-authorization": "SN \u6388\u6743\u7801\u4E0B\u53D1", cups: "CUPS \u4E0A\u62A5", code: "\u7801\u724C\u5212\u8F6C", device: "\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8", "lhsd-device": "\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8", "bind-config": "\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name];
       toolSelect.value = "";
     };
     const updateOptionalSummary = () => {

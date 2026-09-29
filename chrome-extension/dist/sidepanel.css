@@ -123,3 +123,7 @@ h2 { font-size: calc(var(--font-title) - 1px); font-weight: 600; }
 #ticket-remark { width: 100%; padding: 10px; resize: vertical; border: 1px solid #d8dee8; border-radius: 6px; font: inherit; }
 #ticket-submit, #ticket-find { width: 100%; margin-top: 14px; }
 #ticket-search[hidden], #ticket-confirm[hidden] { display: none; }
+#risk-search { width: 100%; margin-top: 14px; }
+.risk-ticket-row { padding: 14px 0; border-bottom: 1px solid #e5e9f0; }
+.risk-ticket-row h2 { font-size: var(--font-body); overflow-wrap: anywhere; }
+.risk-ticket-row .ticket-detail { margin: 12px 0 0; }
