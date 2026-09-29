@@ -109,3 +109,17 @@ h2 { font-size: calc(var(--font-title) - 1px); font-weight: 600; }
 @media (max-width: 350px) { main { padding: 16px 12px; } .app-header { padding: 12px; gap: 8px; flex-wrap: wrap; } .form-row { grid-template-columns: minmax(0,1fr); } .merchant-heading { align-items: start; } .merchant-name strong { display: block; } .optional-config summary { flex-wrap: wrap; } #syt-optional-summary { flex-basis: 100%; text-align: left; padding-left: 25px; } .tool-heading { gap: 6px; } #syt-tool-select { flex-basis: 104px; width: 104px; } }
 .status.cups-success { color: #15803d; }
 .status.cups-warning { color: #a16207; }
+.ticket-table-wrap { margin-top: 18px; overflow-x: auto; }
+.ticket-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: var(--font-small); }
+.ticket-table th, .ticket-table td { padding: 9px 4px; border-bottom: 1px solid #e5e9f0; text-align: left; vertical-align: top; overflow-wrap: anywhere; white-space: pre-line; }
+.ticket-table th:last-child { width: 58px; }
+.ticket-table button { padding: 4px 6px; }
+.ticket-pagination { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
+.ticket-detail { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; margin: 20px 0; }
+.ticket-detail dd { margin: 0; overflow-wrap: anywhere; }
+.ticket-detail dt { color: #69768a; }
+.ticket-approve { display: flex; align-items: center; gap: 8px; }
+.ticket-approve input { width: 18px; height: 18px; margin: 0; }
+#ticket-remark { width: 100%; padding: 10px; resize: vertical; border: 1px solid #d8dee8; border-radius: 6px; font: inherit; }
+#ticket-submit, #ticket-find { width: 100%; margin-top: 14px; }
+#ticket-search[hidden], #ticket-confirm[hidden] { display: none; }

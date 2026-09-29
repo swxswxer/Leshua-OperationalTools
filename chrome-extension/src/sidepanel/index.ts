@@ -18,6 +18,7 @@ import { bindLatestWechatPaymentConfig } from '../tools/payment-config';
 import { saveDeviceBindConfig } from '../tools/device-bind-config';
 import { reportCups } from '../tools/cups-report';
 import { initializeSnAuthorization, snAuthorizationView } from './sn-authorization';
+import { initializeTicketReview, ticketReviewView } from './ticket-review';
 import {
   queryNewDeviceAgent,
   queryOldDeviceAgent,
@@ -63,8 +64,8 @@ function createPanel(): void {
   const root = document.createElement('div');
   root.id = 'syt-extension-root';
   root.innerHTML = `
-    <section class="panel" aria-label="运营工具">
-      <header class="app-header"><span class="brand">${icon('wrench')}运营工具</span><div class="header-settings"><label class="sr-only" for="syt-display-size">显示大小</label><select id="syt-display-size" title="显示大小"><option value="compact">紧凑</option><option value="standard">标准</option><option value="large">大字</option></select><span class="version">v${VERSION}</span></div></header>
+    <section class="panel" aria-label="乐刷运营工具">
+      <header class="app-header"><span class="brand">${icon('wrench')}乐刷运营工具</span><div class="header-settings"><label class="sr-only" for="syt-display-size">显示大小</label><select id="syt-display-size" title="显示大小"><option value="compact">紧凑</option><option value="standard">标准</option><option value="large">大字</option></select><span class="version">v${VERSION}</span></div></header>
       <div id="syt-display-status" class="display-status" role="status"></div>
       <main>
         <div class="tool-heading"><div><button id="syt-back" class="icon-button" type="button" title="返回重置页面" aria-label="返回重置页面">${icon('back')}</button><h1 id="syt-title">子商户号重置</h1></div><select id="syt-tool-select" aria-label="切换工具"><option value="" disabled selected>切换工具</option><option value="reset">子商户号重置</option><option value="code">码牌划转</option><option value="device">收银通机具划拨</option><option value="lhsd-device">联合收单机具划拨</option><option value="whitelist">防切户白名单</option><option value="bind-config">设备换绑配置</option></select></div>
@@ -82,6 +83,7 @@ function createPanel(): void {
           <section class="results-section" aria-label="本次结果"><div class="results-heading"><h2>本次结果</h2><button id="syt-copy" class="text-button" type="button" disabled>${icon('copy')}复制全部</button></div><div id="syt-results"><p class="empty">暂无重置结果</p></div></section>
         </section>
         ${snAuthorizationView}
+        ${ticketReviewView}
         <section id="syt-view-cups" class="view">
           <label for="syt-cups-merchant">乐刷商户号</label><input id="syt-cups-merchant" inputmode="numeric" autocomplete="off" placeholder="10 位乐刷商户号">
           <button id="syt-run-cups" class="primary" type="button">提交上报申请</button><div id="syt-cups-status" class="status" role="status" aria-live="polite"></div>
@@ -109,6 +111,7 @@ function createPanel(): void {
   const toolSelect = byId<HTMLSelectElement>(root, 'syt-tool-select');
   toolSelect.add(new Option('CUPS 上报', 'cups'));
   toolSelect.add(new Option('SN 授权码下发', 'sn-authorization'));
+  toolSelect.add(new Option('工单审核', 'ticket-review'));
   const clearMerchant = byId<HTMLButtonElement>(root, 'syt-clear-merchant');
   const merchantHint = byId<HTMLElement>(root, 'syt-merchant-hint');
   const optionalConfig = byId<HTMLDetailsElement>(root, 'syt-optional-config');
@@ -184,10 +187,12 @@ function createPanel(): void {
       log(`复制失败: ${error instanceof Error ? error.message : String(error)}`, true);
     }
   };
-  const showView = (name: string) => {
+  const ticketReview = initializeTicketReview(root, log);
+  const showView = async (name: string) => {
+    if (!await ticketReview.leave()) { toolSelect.value = ''; return; }
     root.querySelectorAll<HTMLElement>('.view').forEach((view) => view.classList.toggle('active', view.id === `syt-view-${name}`));
     backButton.classList.toggle('visible', name !== 'reset');
-    title.textContent = name === 'reset' ? '子商户号重置' : ({ 'sn-authorization': 'SN 授权码下发', cups: 'CUPS 上报', code: '码牌划转', device: '收银通机具划拨', 'lhsd-device': '联合收单机具划拨', 'bind-config': '设备换绑配置', whitelist: '防切户白名单' } as Record<string, string>)[name];
+    title.textContent = name === 'reset' ? '子商户号重置' : ({ 'ticket-review': '工单审核', 'sn-authorization': 'SN 授权码下发', cups: 'CUPS 上报', code: '码牌划转', device: '收银通机具划拨', 'lhsd-device': '联合收单机具划拨', 'bind-config': '设备换绑配置', whitelist: '防切户白名单' } as Record<string, string>)[name];
     toolSelect.value = '';
   };
   const updateOptionalSummary = () => {

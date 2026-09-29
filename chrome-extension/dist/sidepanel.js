@@ -2901,6 +2901,351 @@
     }
   }
 
+  // src/api/ticket-review.ts
+  var BASE = `${ORIGIN}/lspos/`;
+  var FORM_HEADERS2 = { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" };
+  var REVIEW_FORM = "riskchecks_operation_manager_check";
+  function htmlDocument(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    doc.querySelectorAll("script, style").forEach((node) => node.remove());
+    if (doc.querySelector('input[type="password"]') || /登录|login/i.test(doc.title)) throw new Error("\u767B\u5F55\u5DF2\u5931\u6548\uFF0C\u8BF7\u5148\u767B\u5F55\u8FD0\u8425\u540E\u53F0");
+    if (/没有该项操作权限|无权访问|权限不足/.test(doc.body.textContent || "")) throw new Error("\u5F53\u524D\u8D26\u53F7\u6CA1\u6709\u5DE5\u5355\u5BA1\u6838\u6743\u9650");
+    return doc;
+  }
+  function parseTicketRows(html) {
+    const doc = htmlDocument(html);
+    const table = Array.from(doc.querySelectorAll("table")).find((table2) => Array.from(table2.querySelectorAll("th")).some((th) => th.textContent?.trim() === "\u5F53\u524D\u5904\u7406\u8282\u70B9"));
+    if (!table) throw new Error("\u5DE5\u5355\u67E5\u8BE2\u8FD4\u56DE\u4E86\u672A\u77E5\u9875\u9762\uFF0C\u65E0\u6CD5\u786E\u8BA4\u67E5\u8BE2\u7ED3\u679C");
+    const headers = Array.from(table.querySelectorAll("th")).map((th) => normalizeText(th.textContent));
+    const rows = [];
+    table.querySelectorAll("tbody > tr").forEach((tr) => {
+      const cells = Array.from(tr.children);
+      const get = (name) => normalizeText(cells[headers.indexOf(name)]?.textContent);
+      const ticketNumber = get("\u5DE5\u5355\u53F7");
+      if (!/^RC\d+$/.test(ticketNumber)) return;
+      rows.push({ ticketNumber, merchantId: get("\u5546\u6237\u7F16\u53F7"), merchantName: get("\u5546\u6237\u540D\u79F0"), state: get("\u5904\u7406\u72B6\u6001"), node: get("\u5F53\u524D\u5904\u7406\u8282\u70B9") });
+    });
+    const pages = normalizeText(doc.body.textContent).match(/第\s*(\d+)\s*页[，,]?\s*共\s*(\d+)\s*页/);
+    return { rows, more: !!pages && Number(pages[1]) < Number(pages[2]) };
+  }
+  async function queryTickets(kind, value, page = 1) {
+    const html = await requestText(`${BASE}riskchecks.do?method=retrieveRiskChecksTicketList`, {
+      headers: FORM_HEADERS2,
+      method: "POST",
+      body: buildFormBody({ dateRange: "", ticketNumber: kind === "ticket" ? value : "", merchantId: kind === "merchant" ? value : "", primaryAgentId: "", primaryAgentIdXieji: "", riskSource: "", riskType: "", merchantTxnType: -1, agentClass: -1, agentSubClass: "", manualAppealResult: "", appealReplyTimeRange: "", upcomingProcessName: -1, ticketStatus: "", agentRiskLevel: -1, riskVerifyType: -1, certifNo: "", pageSize: 20, pageNumber: page })
+    });
+    const result = parseTicketRows(html);
+    if (result.rows.some((row) => kind === "merchant" ? row.merchantId !== value : row.ticketNumber !== value)) throw new Error("\u540E\u53F0\u8FD4\u56DE\u4E86\u4E0D\u5339\u914D\u7684\u5DE5\u5355\uFF0C\u8BF7\u5230\u540E\u53F0\u6838\u5BF9\u67E5\u8BE2\u6761\u4EF6");
+    return result;
+  }
+  function parseTask(html, ticketNumber) {
+    const doc = htmlDocument(html);
+    const tasks = [];
+    for (const link of Array.from(doc.querySelectorAll("a[onclick]"))) {
+      const match = (link.getAttribute("onclick") || "").match(/^\s*checkTicket\('([^']*)','([^']*)','(\d+)','(\d+)','([^']*)'\);?\s*$/);
+      if (!match || match[1] !== ticketNumber || match[2] !== REVIEW_FORM || match[5] !== "\u8FD0\u8425\u5BA1\u6838" || link.style.display === "none") continue;
+      tasks.push({ ticketNumber, formKey: match[2], flowTaskId: match[3], upcomingProcessId: match[4] });
+    }
+    if (tasks.length !== 1) throw new Error("\u672A\u627E\u5230\u552F\u4E00\u7684\u8FD0\u8425\u5BA1\u6838\u4EFB\u52A1\uFF0C\u53EF\u80FD\u5DF2\u6D41\u8F6C\u3001\u88AB\u5360\u7528\u6216\u6CA1\u6709\u5BA1\u6838\u6743\u9650");
+    return tasks[0];
+  }
+  async function queryTask(ticketNumber) {
+    return parseTask(await requestText(`${BASE}ticketmanagement.do?method=retrieveTicketCommonVerifyList`, {
+      headers: FORM_HEADERS2,
+      method: "POST",
+      body: buildFormBody({ ticketNumber, prodefid: "ticket_risk_management_risk_checks", upcomingVerify: 0, riskChecksJoinTableFlag: 1, pageSize: 200 })
+    }), ticketNumber);
+  }
+  function verifyReviewPage(html, task) {
+    const doc = htmlDocument(html);
+    const form = doc.querySelector('form[action="riskchecks.do?method=verifyRiskChecksTicket"]');
+    if (!form) throw new Error("\u65E0\u6CD5\u8FDB\u5165\u5BA1\u6838\u9875\u9762\uFF0C\u53EF\u80FD\u88AB\u5176\u4ED6\u4EBA\u5360\u7528\uFF0C\u8BF7\u5230\u540E\u53F0\u786E\u8BA4");
+    for (const [key, value] of Object.entries(task)) {
+      if (form.querySelector(`input[name="${key}"]`)?.value !== value) throw new Error("\u5BA1\u6838\u4EFB\u52A1\u53C2\u6570\u4E0D\u4E00\u81F4\uFF0C\u8BF7\u91CD\u65B0\u67E5\u8BE2");
+    }
+    if (!form.querySelector('input[name="materialCheckResult"][value="1"]')) throw new Error("\u5F53\u524D\u5DE5\u5355\u4E0D\u652F\u6301\u8D44\u6599\u5BA1\u6838\u901A\u8FC7");
+  }
+  async function openReview(task) {
+    const params = buildFormBody({ method: "retrieveTicketVerificationPage", ...task });
+    verifyReviewPage(await requestText(`${BASE}ticketmanagement.do?${params}`), task);
+  }
+  function getAppealInfo(ticketNumber) {
+    return requestJson(`${BASE}riskchecks.do?method=retrieveMrtAppealDetailAndMtlType&${buildFormBody({ ticketNumber })}`);
+  }
+  async function releaseReview(task) {
+    const text = await requestText(`${BASE}ticketmanagement.do?method=dropTicketVerificationPageLock`, { method: "POST", headers: FORM_HEADERS2, body: buildFormBody({ ...task }) });
+    if (/^\s*</.test(text)) {
+      htmlDocument(text);
+      throw new Error("\u91CA\u653E\u5BA1\u6838\u9501\u8FD4\u56DE\u672A\u77E5\u9875\u9762\uFF0C\u8BF7\u5230\u540E\u53F0\u786E\u8BA4");
+    }
+    if (/"(?:success|ok)"\s*:\s*false/.test(text)) throw new Error("\u540E\u53F0\u672A\u786E\u8BA4\u91CA\u653E\u5BA1\u6838\u9501\uFF0C\u8BF7\u5230\u540E\u53F0\u786E\u8BA4");
+  }
+  function assertReviewSuccess(html) {
+    const doc = htmlDocument(html);
+    const success = !!doc.querySelector('img[src$="/success.gif"]') && Array.from(doc.querySelectorAll("span")).some((span) => /^操作成功[!！]?$/.test(normalizeText(span.textContent)));
+    if (!success) throw new Error(`\u540E\u53F0\u672A\u786E\u8BA4\u5BA1\u6838\u6210\u529F\uFF1A${normalizeText(doc.body.textContent).slice(0, 180) || "\u7A7A\u54CD\u5E94"}`);
+  }
+  async function submitReview(task, info, remark) {
+    const html = await requestText(`${BASE}riskchecks.do?method=verifyRiskChecksTicket`, {
+      headers: FORM_HEADERS2,
+      method: "POST",
+      body: buildFormBody({ ...task, materialCheckResult: 1, appealResultName: "", appealFailureReason: "", attachments: "", unpassReason: "", remark, appealType: "", appealResult: "", nonCompliantType: "", merchantAuthenticity: info.merchantAuthenticity, merchantTxnType: info.merchantTxnType })
+    });
+    assertReviewSuccess(html);
+  }
+
+  // src/tools/ticket-review.ts
+  function validateTicketQuery(kind, value) {
+    const input = value.trim();
+    if (!(kind === "merchant" ? /^\d{10}$/ : /^RC\d+$/).test(input)) throw new Error(kind === "merchant" ? "\u8BF7\u8F93\u5165 10 \u4F4D\u4E50\u5237\u5546\u6237\u53F7" : "\u8BF7\u8F93\u5165 RC \u5F00\u5934\u7684\u5B8C\u6574\u5DE5\u5355\u53F7");
+    return input;
+  }
+  function assertSimpleApproval(info) {
+    if (!info || !["1", "2"].includes(String(info.merchantAuthenticity)) || !["1", "2"].includes(String(info.merchantTxnType)) || !["1", "2", "3", "4", "5", "6"].includes(String(info.riskSource)) || info.mtlVerifyStatus == null) throw new Error("\u5DE5\u5355\u4FE1\u606F\u4E0D\u5B8C\u6574\uFF0C\u8BF7\u5728\u540E\u53F0\u5B8C\u6574\u5BA1\u6838\u9875\u9762\u5904\u7406");
+    if (String(info.mtlVerifyStatus) === "6" || ["2", "3"].includes(String(info.riskSource)) && String(info.appealType) !== "3") throw new Error("\u6B64\u5DE5\u5355\u6D89\u53CA\u989D\u5916\u7533\u8BC9\u4FE1\u606F\u6216\u7EBF\u4E0B\u8D44\u6599\uFF0C\u8BF7\u5728\u540E\u53F0\u5B8C\u6574\u5BA1\u6838\u9875\u9762\u5904\u7406");
+  }
+  var ReviewSession = class {
+    constructor(row) {
+      this.row = row;
+    }
+    task;
+    attempted = false;
+    submitting = false;
+    async prepare() {
+      const current = await queryTickets("ticket", this.row.ticketNumber);
+      const row = current.rows.find((row2) => row2.ticketNumber === this.row.ticketNumber);
+      if (!row || row.merchantId !== this.row.merchantId || row.state !== "\u5904\u7406\u4E2D" || row.node !== "\u8FD0\u8425\u5BA1\u6838") throw new Error("\u5DE5\u5355\u5DF2\u53D8\u66F4\u6216\u4E0D\u5904\u4E8E\u8FD0\u8425\u5BA1\u6838\uFF0C\u8BF7\u5237\u65B0\u5217\u8868");
+      const task = await queryTask(row.ticketNumber);
+      await openReview(task);
+      this.task = task;
+      assertSimpleApproval(await getAppealInfo(row.ticketNumber));
+    }
+    async submit(approved, remark) {
+      if (!approved || !remark.trim()) throw new Error("\u8BF7\u52FE\u9009\u8D44\u6599\u5BA1\u6838\u901A\u8FC7\u5E76\u586B\u5199\u5907\u6CE8");
+      if (!this.task || this.attempted || this.submitting) throw new Error("\u672C\u6B21\u5BA1\u6838\u4E0D\u53EF\u91CD\u590D\u63D0\u4EA4\uFF0C\u8BF7\u5237\u65B0\u5DE5\u5355\u786E\u8BA4\u72B6\u6001");
+      this.submitting = true;
+      try {
+        const latest = await queryTask(this.task.ticketNumber);
+        if (JSON.stringify(latest) !== JSON.stringify(this.task)) throw new Error("\u5BA1\u6838\u4EFB\u52A1\u5DF2\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u67E5\u8BE2");
+        const info = await getAppealInfo(this.task.ticketNumber);
+        assertSimpleApproval(info);
+        this.attempted = true;
+        try {
+          await submitReview(this.task, info, remark.trim());
+        } catch (error) {
+          throw new Error(`${error instanceof Error ? error.message : String(error)}\u3002\u8BF7\u5237\u65B0\u5DE5\u5355\u786E\u8BA4\u7ED3\u679C\uFF0C\u52FF\u76F4\u63A5\u91CD\u590D\u5BA1\u6838`);
+        }
+        try {
+          const { rows } = await queryTickets("ticket", this.task.ticketNumber);
+          const current = rows.find((row) => row.ticketNumber === this.task.ticketNumber);
+          return `\u5BA1\u6838\u63D0\u4EA4\u6210\u529F${current ? `\uFF1B\u5F53\u524D\u72B6\u6001\uFF1A${current.state}\uFF0C\u8282\u70B9\uFF1A${current.node}` : "\uFF1B\u672A\u67E5\u8BE2\u5230\u540E\u7EED\u72B6\u6001\uFF0C\u8BF7\u5230\u540E\u53F0\u786E\u8BA4"}`;
+        } catch {
+          return "\u5BA1\u6838\u63D0\u4EA4\u6210\u529F\uFF1B\u540E\u7EED\u72B6\u6001\u67E5\u8BE2\u5931\u8D25\uFF0C\u8BF7\u5237\u65B0\u5DE5\u5355\u786E\u8BA4";
+        }
+      } finally {
+        this.submitting = false;
+      }
+    }
+    async close() {
+      if (!this.task || this.submitting) return;
+      const task = this.task;
+      await releaseReview(task);
+      this.task = void 0;
+    }
+  };
+
+  // src/sidepanel/ticket-review.ts
+  var ticketReviewView = `<section id="syt-view-ticket-review" class="view">
+  <div id="ticket-search">
+    <label for="ticket-kind">\u67E5\u8BE2\u65B9\u5F0F</label><select id="ticket-kind"><option value="merchant">\u5546\u6237\u53F7</option><option value="ticket">\u5DE5\u5355\u53F7</option></select>
+    <label for="ticket-query">\u67E5\u8BE2\u53F7\u7801</label><input id="ticket-query" autocomplete="off">
+    <button id="ticket-find" class="primary" type="button">\u67E5\u8BE2\u5DE5\u5355</button>
+    <div class="ticket-table-wrap"><table class="ticket-table"><thead><tr><th>\u5DE5\u5355\u53F7</th><th>\u5546\u6237</th><th>\u72B6\u6001 / \u8282\u70B9</th><th>\u64CD\u4F5C</th></tr></thead><tbody id="ticket-rows"></tbody></table></div>
+    <div class="ticket-pagination"><button id="ticket-prev" type="button" disabled>\u4E0A\u4E00\u9875</button><span id="ticket-page"></span><button id="ticket-next" type="button" disabled>\u4E0B\u4E00\u9875</button></div>
+  </div>
+  <div id="ticket-confirm" hidden>
+    <button id="ticket-return" type="button">\u8FD4\u56DE\u5217\u8868</button>
+    <dl id="ticket-detail" class="ticket-detail"></dl>
+    <label class="ticket-approve"><input id="ticket-approved" type="checkbox">\u8D44\u6599\u5BA1\u6838\u901A\u8FC7</label>
+    <label for="ticket-remark">\u5907\u6CE8\uFF08\u5FC5\u586B\uFF09</label><textarea id="ticket-remark" rows="4"></textarea>
+    <button id="ticket-submit" class="primary" type="button" disabled>\u63D0\u4EA4\u5BA1\u6838</button>
+  </div>
+  <div id="ticket-status" class="status" role="status" aria-live="polite"></div>
+</section>`;
+  function initializeTicketReview(root, log) {
+    const el = (id) => root.querySelector(`#ticket-${id}`);
+    let session;
+    let busy = false;
+    let page = 1;
+    let more = false;
+    let query;
+    let ready = false;
+    const status = (message, error = false) => {
+      el("status").textContent = message;
+      el("status").className = `status${error ? " error" : ""}`;
+      log(message, error);
+    };
+    const update = () => {
+      for (const id of ["find", "return"]) el(id).disabled = busy;
+      el("kind").disabled = busy;
+      el("query").disabled = busy;
+      el("approved").disabled = busy || !ready;
+      el("remark").disabled = busy || !ready;
+      el("submit").disabled = busy || !ready || !el("approved").checked || !el("remark").value.trim();
+      el("prev").disabled = busy || page <= 1;
+      el("next").disabled = busy || !more;
+      el("rows").querySelectorAll("button").forEach((button) => {
+        button.disabled = busy || button.dataset.available !== "true";
+      });
+    };
+    const close = async () => {
+      if (session) {
+        await session.close();
+        session = void 0;
+      }
+      ready = false;
+      el("confirm").hidden = true;
+      el("search").hidden = false;
+    };
+    const load = async (targetPage = page) => {
+      if (!query) return;
+      const result = await queryTickets(query.kind, query.value, targetPage);
+      page = targetPage;
+      more = result.more;
+      el("rows").replaceChildren();
+      for (const row of result.rows) {
+        const tr = document.createElement("tr");
+        for (const text of [row.ticketNumber, `${row.merchantId}
+${row.merchantName}`, `${row.state}
+${row.node}`]) {
+          const td3 = document.createElement("td");
+          td3.textContent = text;
+          tr.append(td3);
+        }
+        const td2 = document.createElement("td");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "\u5BA1\u6838";
+        let available = row.state === "\u5904\u7406\u4E2D" && row.node === "\u8FD0\u8425\u5BA1\u6838";
+        button.disabled = true;
+        if (available) {
+          try {
+            await queryTask(row.ticketNumber);
+          } catch (error) {
+            available = false;
+            button.title = error instanceof Error ? error.message : String(error);
+          }
+        }
+        button.dataset.available = String(available);
+        button.addEventListener("click", () => void run(async () => open(row)));
+        td2.append(button);
+        tr.append(td2);
+        el("rows").append(tr);
+      }
+      el("page").textContent = `\u7B2C ${page} \u9875`;
+      if (!result.rows.length) {
+        const tr = document.createElement("tr");
+        const td2 = document.createElement("td");
+        td2.colSpan = 4;
+        td2.textContent = "\u672A\u67E5\u8BE2\u5230\u5DE5\u5355";
+        tr.append(td2);
+        el("rows").append(tr);
+      }
+    };
+    const open = async (row) => {
+      await close();
+      status("\u6B63\u5728\u83B7\u53D6\u5F53\u524D\u5BA1\u6838\u4EFB\u52A1...");
+      session = new ReviewSession(row);
+      try {
+        await session.prepare();
+      } catch (error) {
+        try {
+          await close();
+        } catch {
+          status("\u91CA\u653E\u5BA1\u6838\u9501\u5931\u8D25\uFF0C\u8BF7\u5230\u540E\u53F0\u786E\u8BA4", true);
+        }
+        throw error;
+      }
+      ready = true;
+      el("detail").replaceChildren();
+      for (const [name, value] of [["\u5DE5\u5355\u53F7", row.ticketNumber], ["\u5546\u6237\u53F7", row.merchantId], ["\u5546\u6237\u540D\u79F0", row.merchantName], ["\u5F53\u524D\u8282\u70B9", row.node]]) {
+        const dt = document.createElement("dt");
+        dt.textContent = name;
+        const dd = document.createElement("dd");
+        dd.textContent = value;
+        el("detail").append(dt, dd);
+      }
+      el("approved").checked = false;
+      el("remark").value = "";
+      el("search").hidden = true;
+      el("confirm").hidden = false;
+      status("\u5DF2\u83B7\u53D6\u5F53\u524D\u5BA1\u6838\u4EFB\u52A1\uFF0C\u7B49\u5F85\u786E\u8BA4");
+    };
+    const run = async (action) => {
+      if (busy) return;
+      busy = true;
+      update();
+      try {
+        await action();
+      } catch (error) {
+        status(error instanceof Error ? error.message : String(error), true);
+      } finally {
+        busy = false;
+        update();
+      }
+    };
+    el("find").addEventListener("click", () => void run(async () => {
+      await close();
+      const kind = el("kind").value;
+      query = { kind, value: validateTicketQuery(kind, el("query").value) };
+      more = false;
+      el("rows").replaceChildren();
+      status("\u6B63\u5728\u67E5\u8BE2\u5DE5\u5355...");
+      await load(1);
+      status("\u5DE5\u5355\u67E5\u8BE2\u5B8C\u6210");
+    }));
+    for (const [id, delta] of [["prev", -1], ["next", 1]]) el(id).addEventListener("click", () => void run(async () => {
+      await load(page + delta);
+    }));
+    el("return").addEventListener("click", () => void run(async () => {
+      await close();
+      await load();
+      status("\u5DE5\u5355\u5217\u8868\u5DF2\u5237\u65B0");
+    }));
+    el("approved").addEventListener("change", update);
+    el("remark").addEventListener("input", update);
+    el("submit").addEventListener("click", () => void run(async () => {
+      if (!session || !ready) return;
+      ready = false;
+      status("\u6B63\u5728\u63D0\u4EA4\u5BA1\u6838...");
+      try {
+        status(await session.submit(el("approved").checked, el("remark").value));
+      } finally {
+        try {
+          await session.close();
+        } catch (error) {
+          status(`${el("status").textContent}\uFF1B\u91CA\u653E\u5BA1\u6838\u9501\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`, true);
+        }
+      }
+    }));
+    window.addEventListener("pagehide", () => {
+      void session?.close().catch(() => {
+      });
+    });
+    return { async leave() {
+      if (busy) {
+        status("\u6B63\u5728\u5904\u7406\u5DE5\u5355\uFF0C\u8BF7\u7A0D\u5019\u518D\u5207\u6362\u5DE5\u5177", true);
+        return false;
+      }
+      let ok = false;
+      await run(async () => {
+        await close();
+        ok = true;
+      });
+      return ok;
+    } };
+  }
+
   // src/api/device-transfer.ts
   var ENDPOINT3 = "/base-business/pinpad/newTerminal.do";
   var LHSD_TRANSFER_ENDPOINT = "/uts_platform/machine/manager/machineChangeAgent.do";
@@ -3085,8 +3430,8 @@
     const root = document.createElement("div");
     root.id = "syt-extension-root";
     root.innerHTML = `
-    <section class="panel" aria-label="\u8FD0\u8425\u5DE5\u5177">
-      <header class="app-header"><span class="brand">${icon("wrench")}\u8FD0\u8425\u5DE5\u5177</span><div class="header-settings"><label class="sr-only" for="syt-display-size">\u663E\u793A\u5927\u5C0F</label><select id="syt-display-size" title="\u663E\u793A\u5927\u5C0F"><option value="compact">\u7D27\u51D1</option><option value="standard">\u6807\u51C6</option><option value="large">\u5927\u5B57</option></select><span class="version">v${VERSION}</span></div></header>
+    <section class="panel" aria-label="\u4E50\u5237\u8FD0\u8425\u5DE5\u5177">
+      <header class="app-header"><span class="brand">${icon("wrench")}\u4E50\u5237\u8FD0\u8425\u5DE5\u5177</span><div class="header-settings"><label class="sr-only" for="syt-display-size">\u663E\u793A\u5927\u5C0F</label><select id="syt-display-size" title="\u663E\u793A\u5927\u5C0F"><option value="compact">\u7D27\u51D1</option><option value="standard">\u6807\u51C6</option><option value="large">\u5927\u5B57</option></select><span class="version">v${VERSION}</span></div></header>
       <div id="syt-display-status" class="display-status" role="status"></div>
       <main>
         <div class="tool-heading"><div><button id="syt-back" class="icon-button" type="button" title="\u8FD4\u56DE\u91CD\u7F6E\u9875\u9762" aria-label="\u8FD4\u56DE\u91CD\u7F6E\u9875\u9762">${icon("back")}</button><h1 id="syt-title">\u5B50\u5546\u6237\u53F7\u91CD\u7F6E</h1></div><select id="syt-tool-select" aria-label="\u5207\u6362\u5DE5\u5177"><option value="" disabled selected>\u5207\u6362\u5DE5\u5177</option><option value="reset">\u5B50\u5546\u6237\u53F7\u91CD\u7F6E</option><option value="code">\u7801\u724C\u5212\u8F6C</option><option value="device">\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8</option><option value="lhsd-device">\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8</option><option value="whitelist">\u9632\u5207\u6237\u767D\u540D\u5355</option><option value="bind-config">\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E</option></select></div>
@@ -3104,6 +3449,7 @@
           <section class="results-section" aria-label="\u672C\u6B21\u7ED3\u679C"><div class="results-heading"><h2>\u672C\u6B21\u7ED3\u679C</h2><button id="syt-copy" class="text-button" type="button" disabled>${icon("copy")}\u590D\u5236\u5168\u90E8</button></div><div id="syt-results"><p class="empty">\u6682\u65E0\u91CD\u7F6E\u7ED3\u679C</p></div></section>
         </section>
         ${snAuthorizationView}
+        ${ticketReviewView}
         <section id="syt-view-cups" class="view">
           <label for="syt-cups-merchant">\u4E50\u5237\u5546\u6237\u53F7</label><input id="syt-cups-merchant" inputmode="numeric" autocomplete="off" placeholder="10 \u4F4D\u4E50\u5237\u5546\u6237\u53F7">
           <button id="syt-run-cups" class="primary" type="button">\u63D0\u4EA4\u4E0A\u62A5\u7533\u8BF7</button><div id="syt-cups-status" class="status" role="status" aria-live="polite"></div>
@@ -3130,6 +3476,7 @@
     const toolSelect = byId(root, "syt-tool-select");
     toolSelect.add(new Option("CUPS \u4E0A\u62A5", "cups"));
     toolSelect.add(new Option("SN \u6388\u6743\u7801\u4E0B\u53D1", "sn-authorization"));
+    toolSelect.add(new Option("\u5DE5\u5355\u5BA1\u6838", "ticket-review"));
     const clearMerchant = byId(root, "syt-clear-merchant");
     const merchantHint = byId(root, "syt-merchant-hint");
     const optionalConfig = byId(root, "syt-optional-config");
@@ -3209,10 +3556,15 @@
         log(`\u590D\u5236\u5931\u8D25: ${error instanceof Error ? error.message : String(error)}`, true);
       }
     };
-    const showView = (name) => {
+    const ticketReview = initializeTicketReview(root, log);
+    const showView = async (name) => {
+      if (!await ticketReview.leave()) {
+        toolSelect.value = "";
+        return;
+      }
       root.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === `syt-view-${name}`));
       backButton.classList.toggle("visible", name !== "reset");
-      title.textContent = name === "reset" ? "\u5B50\u5546\u6237\u53F7\u91CD\u7F6E" : { "sn-authorization": "SN \u6388\u6743\u7801\u4E0B\u53D1", cups: "CUPS \u4E0A\u62A5", code: "\u7801\u724C\u5212\u8F6C", device: "\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8", "lhsd-device": "\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8", "bind-config": "\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name];
+      title.textContent = name === "reset" ? "\u5B50\u5546\u6237\u53F7\u91CD\u7F6E" : { "ticket-review": "\u5DE5\u5355\u5BA1\u6838", "sn-authorization": "SN \u6388\u6743\u7801\u4E0B\u53D1", cups: "CUPS \u4E0A\u62A5", code: "\u7801\u724C\u5212\u8F6C", device: "\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8", "lhsd-device": "\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8", "bind-config": "\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name];
       toolSelect.value = "";
     };
     const updateOptionalSummary = () => {

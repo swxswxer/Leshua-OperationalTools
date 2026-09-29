@@ -12,6 +12,8 @@ npm test
 npm run build
 ```
 
+Edge 商店上传包使用 `npm run package:edge` 生成 `leshua-operations-edge-<版本>.zip`。该命令先构建，再将 dist 内容打到 ZIP 根目录，仅在商店包内移除禁止提交的 `manifest.key`。本地 manifest 和 dist 保留固定 key，不要直接用开发目录的压缩包提交商店。
+
 在 Chrome 打开 `chrome://extensions`，启用开发者模式后选择“加载已解压的扩展程序”，加载 [`chrome-extension/dist`](/Users/swxswx/Desktop/work/code/Report-Tampermonkey/chrome-extension/dist)。
 
 需要 Chrome 120 或更新版本。安装后在右上角扩展菜单中固定“运营工具”，点击图标即可打开原生侧边栏，关闭使用 Chrome 自带按钮。首次升级到 1.0.6 后重新加载扩展并刷新之前打开的后台/客服页面，清除旧版遗留的悬浮界面。请先在同一浏览器配置文件中登录运营后台。
@@ -101,3 +103,15 @@ chrome-extension/src/
 - [`chrome-extension/src/types.ts`](/Users/swxswx/Desktop/work/code/Report-Tampermonkey/chrome-extension/src/types.ts)：跨模块共用类型，避免 API 层依赖界面层。
 
 修改后应在 `chrome-extension/` 下运行类型检查、测试和构建，再到扩展管理页点击“重新加载”。
+
+### 工单审核
+
+- 在“切换工具”中选择“工单审核”，按 10 位商户号或 RC 开头的工单号查询，列表支持翻页。
+- 仅支持风险排查工单的运营审核节点。列表中的审核按钮还会检查后台是否返回当前账号可用的审核入口。
+- 点击审核后进入独立确认页，不展示资料、不提供“不通过”；用户需自行完成业务核验，主动勾选“资料审核通过”并填写备注后提交。
+- 每张工单动态读取 formKey、flowTaskId、upcomingProcessId；商户真实性和交易类型来自申诉详情接口，不能复用示例值。
+- 微信/支付宝违规的非“其他”申诉方式，以及线下申诉资料场景，均提示回后台完整审核页面处理，不以空参数绕过要求。
+- 提交前重查当前任务。收到明确成功 HTML 后重新查询工单状态；提交成功不代表工单结案。超时或未知响应不自动重试，返回列表刷新确认。
+- 返回、切换工具和提交结束时释放本次已进入审核页面的锁；页面关闭时仅能尽力释放，浏览器异常退出或网络中断后应到后台确认锁状态。
+- 独立模块：`src/api/ticket-review.ts`（请求和 HTML 解析）、`src/tools/ticket-review.ts`（审核会话及校验）、`src/sidepanel/ticket-review.ts`（查询列表与确认页）。
+- 回归测试：`tests/ticket-review.test.ts`。禁止使用真实工单做自动通过测试；集成测试应模拟后台响应。
