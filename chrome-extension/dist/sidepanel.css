@@ -127,3 +127,6 @@ h2 { font-size: calc(var(--font-title) - 1px); font-weight: 600; }
 .risk-ticket-row { padding: 14px 0; border-bottom: 1px solid #e5e9f0; }
 .risk-ticket-row h2 { font-size: var(--font-body); overflow-wrap: anywhere; }
 .risk-ticket-row .ticket-detail { margin: 12px 0 0; }
+.risk-handling-link { display: block; margin-top: 14px; overflow-wrap: anywhere; color: #2563eb; }
+.risk-handling-content { width: 100%; margin-top: 10px; padding: 8px; font: inherit; border: 1px solid #d8dee8; border-radius: 6px; resize: vertical; }
+.risk-handling-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }

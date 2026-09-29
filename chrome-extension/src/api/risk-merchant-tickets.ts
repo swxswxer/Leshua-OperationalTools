@@ -3,6 +3,30 @@ import { ORIGIN, buildFormBody, normalizeText, requestText } from './http';
 export type RiskCardType = '1' | '2' | '3';
 export interface RiskTicket { created: string; cardType: string; maskedNumber: string; merchantId: string; ticketNumber: string; node: string; status: string; operator: string }
 export interface RiskTicketPage { rows: RiskTicket[]; page: number; pages: number; total: number }
+export interface RiskHandlingLink { url: string; content: string }
+
+export function parseRiskHandlingLink(html: string, ticketNumber: string, merchantId: string): RiskHandlingLink {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  if (doc.querySelector('input[type="password"]') || /登录|login/i.test(doc.title)) throw new Error('登录已失效，请先登录运营后台');
+  const content = doc.querySelector<HTMLTextAreaElement>('textarea#content')?.value.trim();
+  if (!content) throw new Error('后台未返回处理链接或当前账号没有访问权限');
+  const urls = content.match(/https:\/\/[^\s，。<>"']+/g) || [];
+  for (const candidate of urls) {
+    try {
+      const url = new URL(candidate);
+      const hash = url.hash.slice(1);
+      const params = new URLSearchParams(hash.slice(hash.indexOf('?') + 1));
+      if (url.origin === 'https://h5.leshuazf.com' && url.pathname === '/wap/riskOrder/order-appeal-h5/' && hash.startsWith('/appeal?') && params.get('ticketNumber') === ticketNumber && params.get('merchantId') === merchantId) return { url: url.href, content };
+    } catch { /* Only use a valid backend-provided URL matching this record. */ }
+  }
+  throw new Error('后台未返回与本工单、商户匹配的处理链接');
+}
+
+export async function queryRiskHandlingLink(ticketNumber: string, merchantId: string): Promise<RiskHandlingLink> {
+  if (!/^RC\d+$/.test(ticketNumber) || !/^\d+$/.test(merchantId)) throw new Error('工单号或商户号缺失，无法查询处理链接');
+  const html = await requestText(`${ORIGIN}/lspos/riskchecks.do?${buildFormBody({ method: 'loadSendDelayMessageView', ticketNumber })}`);
+  return parseRiskHandlingLink(html, ticketNumber, merchantId);
+}
 
 export function parseRiskTickets(html: string): RiskTicketPage {
   const doc = new DOMParser().parseFromString(html, 'text/html');

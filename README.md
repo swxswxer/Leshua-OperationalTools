@@ -108,7 +108,7 @@ chrome-extension/src/
 
 在“切换工具”选择“风险商户工单查询”，选择身份证、营业执照或银行卡号，输入号码查询。结果展示工单号、商户号、处理节点、名单状态、后台脱敏证件号、创建时间及操作人，支持分页；不执行审核、名单启停或短信发送。查询号码不写入运行日志、不持久化。
 
-接口为 `POST /lspos/merchantCardBlackList.do?method=list`，类型按后台下拉框定义映射：身份证 `1`、银行卡 `2`、营业执照 `3`（抓包中的银行卡示例误写为 `3`）。模块分别为 `api/risk-merchant-tickets.ts`、`tools/risk-merchant-tickets.ts`、`sidepanel/risk-merchant-tickets.ts`。
+接口为 `POST /lspos/merchantCardBlackList.do?method=list`，类型按后台下拉框定义映射：身份证 `1`、银行卡 `2`、营业执照 `3`（抓包中的银行卡示例误写为 `3`）。查到记录后自动调用 `riskchecks.do?method=loadSendDelayMessageView&ticketNumber=...`，从返回页面的 `textarea#content` 提取通知内容及处理链接，并校验链接中的商户号、工单号与记录一致。每页最多 3 个链接请求并发，单条失败单独展示，不影响其他结果；支持复制处理链接或完整通知，不调用发送短信接口，不自行拼接处理链接。模块分别为 `api/risk-merchant-tickets.ts`、`tools/risk-merchant-tickets.ts`、`sidepanel/risk-merchant-tickets.ts`。
 
 ### 工单审核流程
 

@@ -3247,6 +3247,28 @@ ${row.node}`]) {
   }
 
   // src/api/risk-merchant-tickets.ts
+  function parseRiskHandlingLink(html, ticketNumber, merchantId) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    if (doc.querySelector('input[type="password"]') || /登录|login/i.test(doc.title)) throw new Error("\u767B\u5F55\u5DF2\u5931\u6548\uFF0C\u8BF7\u5148\u767B\u5F55\u8FD0\u8425\u540E\u53F0");
+    const content = doc.querySelector("textarea#content")?.value.trim();
+    if (!content) throw new Error("\u540E\u53F0\u672A\u8FD4\u56DE\u5904\u7406\u94FE\u63A5\u6216\u5F53\u524D\u8D26\u53F7\u6CA1\u6709\u8BBF\u95EE\u6743\u9650");
+    const urls = content.match(/https:\/\/[^\s，。<>"']+/g) || [];
+    for (const candidate of urls) {
+      try {
+        const url = new URL(candidate);
+        const hash = url.hash.slice(1);
+        const params = new URLSearchParams(hash.slice(hash.indexOf("?") + 1));
+        if (url.origin === "https://h5.leshuazf.com" && url.pathname === "/wap/riskOrder/order-appeal-h5/" && hash.startsWith("/appeal?") && params.get("ticketNumber") === ticketNumber && params.get("merchantId") === merchantId) return { url: url.href, content };
+      } catch {
+      }
+    }
+    throw new Error("\u540E\u53F0\u672A\u8FD4\u56DE\u4E0E\u672C\u5DE5\u5355\u3001\u5546\u6237\u5339\u914D\u7684\u5904\u7406\u94FE\u63A5");
+  }
+  async function queryRiskHandlingLink(ticketNumber, merchantId) {
+    if (!/^RC\d+$/.test(ticketNumber) || !/^\d+$/.test(merchantId)) throw new Error("\u5DE5\u5355\u53F7\u6216\u5546\u6237\u53F7\u7F3A\u5931\uFF0C\u65E0\u6CD5\u67E5\u8BE2\u5904\u7406\u94FE\u63A5");
+    const html = await requestText(`${ORIGIN}/lspos/riskchecks.do?${buildFormBody({ method: "loadSendDelayMessageView", ticketNumber })}`);
+    return parseRiskHandlingLink(html, ticketNumber, merchantId);
+  }
   function parseRiskTickets(html) {
     const doc = new DOMParser().parseFromString(html, "text/html");
     doc.querySelectorAll("script,style").forEach((node) => node.remove());
@@ -3280,6 +3302,20 @@ ${row.node}`]) {
   }
 
   // src/tools/risk-merchant-tickets.ts
+  async function loadRiskHandlingLinks(rows) {
+    const results = [];
+    for (let start = 0; start < rows.length; start += 3) {
+      const batch = await Promise.all(rows.slice(start, start + 3).map(async (row) => {
+        try {
+          return { ...row, handling: await queryRiskHandlingLink(row.ticketNumber, row.merchantId) };
+        } catch (error) {
+          return { ...row, linkError: error instanceof Error ? error.message : "\u5904\u7406\u94FE\u63A5\u83B7\u53D6\u5931\u8D25" };
+        }
+      }));
+      results.push(...batch);
+    }
+    return results;
+  }
   function searchRiskMerchantTickets(type, number, page = 1) {
     if (!["1", "2", "3"].includes(type)) throw new Error("\u8BF7\u9009\u62E9\u8EAB\u4EFD\u8BC1\u3001\u8425\u4E1A\u6267\u7167\u6216\u94F6\u884C\u5361\u53F7");
     const value = number.trim();
@@ -3342,7 +3378,9 @@ ${row.node}`]) {
         query = current;
         page = result.page;
         pages = result.pages;
-        for (const row of result.rows) {
+        if (result.rows.length) get("status").textContent = `\u67E5\u5230 ${result.rows.length} \u6761\u8BB0\u5F55\uFF0C\u6B63\u5728\u83B7\u53D6\u5904\u7406\u94FE\u63A5...`;
+        const rows = await loadRiskHandlingLinks(result.rows);
+        for (const row of rows) {
           const section = document.createElement("article");
           section.className = "risk-ticket-row";
           const heading = document.createElement("h2");
@@ -3358,12 +3396,51 @@ ${row.node}`]) {
             dl.append(dt, dd);
           }
           section.append(dl);
+          if (row.handling) {
+            const link = document.createElement("a");
+            link.href = row.handling.url;
+            link.textContent = row.handling.url;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.className = "risk-handling-link";
+            const message2 = document.createElement("textarea");
+            message2.readOnly = true;
+            message2.value = row.handling.content;
+            message2.rows = 5;
+            message2.className = "risk-handling-content";
+            message2.setAttribute("aria-label", "\u5904\u7406\u901A\u77E5\u5185\u5BB9");
+            const actions = document.createElement("div");
+            actions.className = "risk-handling-actions";
+            for (const [label, text] of [["\u590D\u5236\u5904\u7406\u94FE\u63A5", row.handling.url], ["\u590D\u5236\u5B8C\u6574\u901A\u77E5", row.handling.content]]) {
+              const button = document.createElement("button");
+              button.type = "button";
+              setButtonLabel(button, "copy", label);
+              button.addEventListener("click", async () => {
+                try {
+                  await copyText(text);
+                  setButtonLabel(button, "check", "\u5DF2\u590D\u5236");
+                } catch {
+                  get("status").textContent = "\u590D\u5236\u5931\u8D25\uFF0C\u8BF7\u624B\u52A8\u9009\u62E9\u901A\u77E5\u5185\u5BB9\u590D\u5236";
+                  get("status").className = "status error";
+                }
+              });
+              actions.append(button);
+            }
+            section.append(link, message2, actions);
+          } else {
+            const error = document.createElement("p");
+            error.className = "status error";
+            error.textContent = `\u5904\u7406\u94FE\u63A5\u83B7\u53D6\u5931\u8D25\uFF1A${row.linkError}`;
+            section.append(error);
+          }
           get("results").append(section);
         }
         get("page").textContent = `\u7B2C ${page} / ${Math.max(pages, 1)} \u9875`;
-        const message = result.rows.length ? `\u67E5\u8BE2\u5B8C\u6210\uFF0C\u5171 ${result.total} \u6761\u8BB0\u5F55` : "\u672A\u67E5\u8BE2\u5230\u5339\u914D\u8BB0\u5F55";
+        const failures = rows.filter((row) => !row.handling).length;
+        const message = result.rows.length ? `\u67E5\u8BE2\u5B8C\u6210\uFF0C\u5171 ${result.total} \u6761\u8BB0\u5F55\uFF1B\u672C\u9875 ${rows.length - failures} \u4E2A\u5904\u7406\u94FE\u63A5${failures ? `\uFF0C${failures} \u6761\u83B7\u53D6\u5931\u8D25` : ""}` : "\u672A\u67E5\u8BE2\u5230\u5339\u914D\u8BB0\u5F55";
         get("status").textContent = message;
-        log(`\u98CE\u9669\u5546\u6237\u5DE5\u5355\uFF1A${message}`);
+        get("status").className = failures ? "status error" : "status";
+        log(`\u98CE\u9669\u5546\u6237\u5DE5\u5355\uFF1A${message}`, failures > 0);
       } catch (error) {
         query = void 0;
         pages = 0;

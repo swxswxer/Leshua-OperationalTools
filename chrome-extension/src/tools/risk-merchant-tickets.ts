@@ -1,4 +1,18 @@
-import { queryRiskTickets, type RiskCardType } from '../api/risk-merchant-tickets';
+import { queryRiskTickets, queryRiskHandlingLink, type RiskCardType, type RiskTicket, type RiskHandlingLink } from '../api/risk-merchant-tickets';
+
+export type RiskTicketWithLink = RiskTicket & { handling?: RiskHandlingLink; linkError?: string };
+
+export async function loadRiskHandlingLinks(rows: RiskTicket[]): Promise<RiskTicketWithLink[]> {
+  const results: RiskTicketWithLink[] = [];
+  for (let start = 0; start < rows.length; start += 3) {
+    const batch = await Promise.all(rows.slice(start, start + 3).map(async row => {
+      try { return { ...row, handling: await queryRiskHandlingLink(row.ticketNumber, row.merchantId) }; }
+      catch (error) { return { ...row, linkError: error instanceof Error ? error.message : '处理链接获取失败' }; }
+    }));
+    results.push(...batch);
+  }
+  return results;
+}
 
 export function searchRiskMerchantTickets(type: string, number: string, page = 1) {
   if (!['1', '2', '3'].includes(type)) throw new Error('请选择身份证、营业执照或银行卡号');
