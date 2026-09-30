@@ -45,7 +45,12 @@ export function parseRepayPage(html: string, type: Settlement, merchantId: strin
     rows.push({ type, billId, merchantId, date: get('结算日期'), reason: get('失败原因'), selectable });
   });
   const pagination = body.match(/第\s*(\d+)\s*页[，,]?\s*共\s*(\d+)\s*页/);
-  if (!pagination) throw new Error('无法确认打款单分页信息，请到后台核对');
+  if (!pagination) {
+    const total = body.match(/共\s*(\d+)\s*条记录/);
+    // Empty backend lists can omit the entire pagination footer.
+    if (!rows.length && !table.querySelector('input[name="select_item"]') && (!total || Number(total[1]) === 0)) return { rows, page: 1, pages: 0 };
+    throw new Error('无法确认打款单分页信息，请到后台核对');
+  }
   return { rows, page: Number(pagination[1]), pages: Number(pagination[2]) };
 }
 export async function queryRepayPage(type: Settlement, merchantId: string, page: number, range: string): Promise<RepayPage> {

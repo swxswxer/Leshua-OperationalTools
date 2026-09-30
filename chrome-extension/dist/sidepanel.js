@@ -3504,7 +3504,11 @@ ${row.node}`]) {
       rows.push({ type, billId, merchantId, date: get("\u7ED3\u7B97\u65E5\u671F"), reason: get("\u5931\u8D25\u539F\u56E0"), selectable });
     });
     const pagination = body.match(/第\s*(\d+)\s*页[，,]?\s*共\s*(\d+)\s*页/);
-    if (!pagination) throw new Error("\u65E0\u6CD5\u786E\u8BA4\u6253\u6B3E\u5355\u5206\u9875\u4FE1\u606F\uFF0C\u8BF7\u5230\u540E\u53F0\u6838\u5BF9");
+    if (!pagination) {
+      const total = body.match(/共\s*(\d+)\s*条记录/);
+      if (!rows.length && !table.querySelector('input[name="select_item"]') && (!total || Number(total[1]) === 0)) return { rows, page: 1, pages: 0 };
+      throw new Error("\u65E0\u6CD5\u786E\u8BA4\u6253\u6B3E\u5355\u5206\u9875\u4FE1\u606F\uFF0C\u8BF7\u5230\u540E\u53F0\u6838\u5BF9");
+    }
     return { rows, page: Number(pagination[1]), pages: Number(pagination[2]) };
   }
   async function queryRepayPage(type, merchantId, page, range) {

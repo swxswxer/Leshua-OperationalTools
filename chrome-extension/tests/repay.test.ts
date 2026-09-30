@@ -1,8 +1,35 @@
-import { beforeEach, expect, it, vi } from 'vitest';
-import { applyRepay, queryRepayPage, repayDateRange, repayQueryBody, parseRepayResponse, type RepayRow } from '../src/api/repay';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { applyRepay, queryRepayPage, repayDateRange, repayQueryBody, parseRepayPage, parseRepayResponse, type RepayRow } from '../src/api/repay';
 import { searchRepay, submitSelectedRepay } from '../src/tools/repay';
 vi.mock('../src/api/repay', async original => ({ ...await original<typeof import('../src/api/repay')>(), applyRepay: vi.fn(), queryRepayPage: vi.fn() }));
 beforeEach(() => vi.resetAllMocks());
+afterEach(() => vi.unstubAllGlobals());
+function stubEmptyTable(body: string, hasCheckbox = false) {
+  const table = {
+    querySelectorAll: (selector: string) => selector === 'th' ? ['结算日期','商户号','打款单号','失败原因'].map(textContent => ({ textContent })) : [],
+    querySelector: () => hasCheckbox ? {} : null,
+  };
+  vi.stubGlobal('DOMParser', class {
+    parseFromString() { return { title: '重打款', body: { textContent: body }, querySelector: () => null, querySelectorAll: (selector: string) => selector === 'table' ? [table] : [] }; }
+  });
+}
+it.each(['T0','T1'] as const)('%s 空列表无分页栏是正常空结果', type => {
+  stubEmptyTable('暂无数据');
+  expect(parseRepayPage('',type,'0012345678')).toEqual({ rows: [], page: 1, pages: 0 });
+  stubEmptyTable('共 0 条记录');
+  expect(parseRepayPage('',type,'0012345678').rows).toEqual([]);
+});
+it('存在记录计数或 checkbox 时不能误判为空', () => {
+  stubEmptyTable('共 1 条记录');
+  expect(() => parseRepayPage('','T0','0012345678')).toThrow('分页信息');
+  stubEmptyTable('', true);
+  expect(() => parseRepayPage('','T1','0012345678')).toThrow('分页信息');
+});
+it('T0/T1 正常空结果不会转成查询错误', async () => {
+  vi.mocked(queryRepayPage).mockResolvedValue({ rows: [], page: 1, pages: 0 });
+  const result = await searchRepay('0012345678');
+  expect(result.rows).toEqual([]); expect(result.errors).toEqual([]);
+});
 const row = (type: 'T0' | 'T1', billId = '000123'): RepayRow => ({ type, billId, merchantId: '0012345678', date: '2026-09-29', reason: '失败', selectable: true });
 it('T1 范围从当年一月一日到明天，正确跨年', () => {
   expect(repayDateRange(new Date(2026, 8, 29))).toBe('2026-01-01 ~ 2026-09-30');
