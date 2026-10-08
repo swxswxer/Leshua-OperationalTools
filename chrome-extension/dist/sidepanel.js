@@ -3110,6 +3110,18 @@
     if (!info || !["1", "2"].includes(String(info.merchantAuthenticity)) || !["1", "2"].includes(String(info.merchantTxnType)) || !["1", "2", "3", "4", "5", "6"].includes(String(info.riskSource)) || info.mtlVerifyStatus == null) throw new Error("\u5DE5\u5355\u4FE1\u606F\u4E0D\u5B8C\u6574\uFF0C\u8BF7\u5728\u540E\u53F0\u5B8C\u6574\u5BA1\u6838\u9875\u9762\u5904\u7406");
     if (String(info.mtlVerifyStatus) === "6") throw new Error("\u6B64\u5DE5\u5355\u6D89\u53CA\u7EBF\u4E0B\u8D44\u6599\uFF0C\u8BF7\u5728\u540E\u53F0\u5B8C\u6574\u5BA1\u6838\u9875\u9762\u5904\u7406");
   }
+  function addKnownAppealResultField(fields, info) {
+    if (!["2", "3"].includes(String(info.riskSource)) || String(info.appealType) === "3") return fields;
+    if (fields.some((field) => field.name === "appealResultName")) return fields;
+    return [...fields, {
+      name: "appealResultName",
+      label: "\u5FAE\u4FE1/\u652F\u4ED8\u5B9D\u7533\u8BC9\u7ED3\u679C",
+      choices: [
+        { value: "1", label: "\u7533\u8BC9\u6210\u529F" },
+        { value: "2", label: "\u7533\u8BC9\u4E0D\u6210\u529F" }
+      ]
+    }];
+  }
   var ReviewSession = class {
     constructor(row) {
       this.row = row;
@@ -3127,9 +3139,7 @@
       this.task = task;
       const info = await getAppealInfo(row.ticketNumber);
       assertSimpleApproval(info);
-      if (["2", "3"].includes(String(info.riskSource)) && String(info.appealType) !== "3" && !this.fields.length) {
-        throw new Error("\u540E\u53F0\u5BA1\u6838\u9875\u672A\u8FD4\u56DE\u5FAE\u4FE1/\u652F\u4ED8\u5B9D\u7533\u8BC9\u7ED3\u679C\u9009\u9879\uFF0C\u8BF7\u5728\u540E\u53F0\u5B8C\u6574\u5BA1\u6838\u9875\u9762\u5904\u7406");
-      }
+      this.fields = addKnownAppealResultField(this.fields, info);
     }
     async submit(approved, remark, selections = {}) {
       if (!approved || !remark.trim()) throw new Error("\u8BF7\u52FE\u9009\u8D44\u6599\u5BA1\u6838\u901A\u8FC7\u5E76\u586B\u5199\u5907\u6CE8");

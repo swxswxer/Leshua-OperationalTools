@@ -50,11 +50,17 @@ it('超时不重试，仍可释放锁', async () => {
   expect(api.submitReview).toHaveBeenCalledTimes(1);
   await session.close(); expect(api.releaseReview).toHaveBeenCalledTimes(1);
 });
-it('读取特殊申诉后仍释放已取得的锁，无法打开页面时不乱解锁', async () => {
+it('申诉结果字段使用已确认的动态选项，线下资料仍需后台审核', async () => {
   const session = new ReviewSession(row);
   vi.mocked(api.getAppealInfo).mockResolvedValue({ ...info, appealType: 1 });
-  await expect(session.prepare()).rejects.toThrow();
+  await session.prepare();
+  expect(session.fields).toEqual([{ name: 'appealResultName', label: '微信/支付宝申诉结果', choices: [{ value: '1', label: '申诉成功' }, { value: '2', label: '申诉不成功' }] }]);
+  await expect(session.submit(true, '备注')).rejects.toThrow('请选择微信/支付宝申诉结果');
   await session.close(); expect(api.releaseReview).toHaveBeenCalledTimes(1);
+  vi.mocked(api.releaseReview).mockClear();
+  vi.mocked(api.getAppealInfo).mockResolvedValue({ ...info, mtlVerifyStatus: 6 });
+  const offline = new ReviewSession(row); await expect(offline.prepare()).rejects.toThrow('线下资料');
+  await offline.close(); expect(api.releaseReview).toHaveBeenCalledTimes(1);
   vi.mocked(api.releaseReview).mockClear();
   vi.mocked(api.openReview).mockRejectedValue(new Error('被占用'));
   const blocked = new ReviewSession(row); await expect(blocked.prepare()).rejects.toThrow();

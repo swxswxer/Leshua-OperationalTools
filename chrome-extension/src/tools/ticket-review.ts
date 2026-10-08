@@ -9,6 +9,20 @@ export function assertSimpleApproval(info: AppealInfo): void {
   if (!info || !['1', '2'].includes(String(info.merchantAuthenticity)) || !['1', '2'].includes(String(info.merchantTxnType)) || !['1','2','3','4','5','6'].includes(String(info.riskSource)) || info.mtlVerifyStatus == null) throw new Error('工单信息不完整，请在后台完整审核页面处理');
   if (String(info.mtlVerifyStatus) === '6') throw new Error('此工单涉及线下资料，请在后台完整审核页面处理');
 }
+
+function addKnownAppealResultField(fields: ReviewField[], info: AppealInfo): ReviewField[] {
+  if (!['2', '3'].includes(String(info.riskSource)) || String(info.appealType) === '3') return fields;
+  if (fields.some(field => field.name === 'appealResultName')) return fields;
+  return [...fields, {
+    name: 'appealResultName',
+    label: '微信/支付宝申诉结果',
+    choices: [
+      { value: '1', label: '申诉成功' },
+      { value: '2', label: '申诉不成功' },
+    ],
+  }];
+}
+
 export class ReviewSession {
   private task?: TicketTask;
   fields: ReviewField[] = [];
@@ -24,9 +38,7 @@ export class ReviewSession {
     this.task = task;
     const info = await getAppealInfo(row.ticketNumber);
     assertSimpleApproval(info);
-    if (['2', '3'].includes(String(info.riskSource)) && String(info.appealType) !== '3' && !this.fields.length) {
-      throw new Error('后台审核页未返回微信/支付宝申诉结果选项，请在后台完整审核页面处理');
-    }
+    this.fields = addKnownAppealResultField(this.fields, info);
   }
   async submit(approved: boolean, remark: string, selections: Record<string, string> = {}): Promise<string> {
     if (!approved || !remark.trim()) throw new Error('请勾选资料审核通过并填写备注');
