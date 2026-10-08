@@ -46,7 +46,7 @@ Edge 商店上传包使用 `npm run package:edge` 生成 `leshua-operations-edge
 
 ### CUPS 上报维护说明
 
-- `src/api/cups.ts`：通过 `lsuser_center/userInfo.do?method=loaddata` 读取 `input[name=usercode]`，提交 `POST /lspos/cups.do?method=batchGenerateAndBind`，解析响应。
+- `src/api/cups.ts`：通过 `lsuser_center/userInfo.do?method=loaddata` 读取 `input[name=usercode]`，提交 `POST /lspos/cups.do?method=batchGenerateAndBind`，并以商户号查询 `POST /lspos/cups.do?method=channelCupsList`，解析上报记录。
 - `src/tools/cups-report.ts`：商户号校验、读取模板、生成 Excel、提交申请；`assets/cups_generate_template.xlsx` 为用户提供的官方模板。`fflate` 在本地打包使用，不依赖 CDN；保留模板其他 XML 内容和样式，不上传模板中的示例商户号。
 - multipart 字段为 `file`、`applicant`（当前账号）、`reason=1`、`channelType=1`、`merchantType=undefined`（按抓包发送字符串，并非省略字段）。Content-Type boundary 由浏览器生成；不保存 Cookie。
 - 已确认成功响应为 `{"code":1,"errMsg":null,"data":null,"success":true}`，仅代表申请受理。明确失败显示后台原因；不认识的响应显示待核实，绝不因 HTTP 200 判定成功。提交超时或连接异常可能已被后台受理，不自动重试，请先核实再提交。
@@ -115,6 +115,8 @@ chrome-extension/src/
 ### 风险工单查询流程
 
 在“切换工具”选择“风险商户工单查询”，选择身份证、营业执照或银行卡号，输入号码查询。结果展示工单号、商户号、处理节点、名单状态、后台脱敏证件号、创建时间及操作人，支持分页；不执行审核、名单启停或短信发送。查询号码不写入运行日志、不持久化。
+
+也可选择“商户号”，输入10位乐刷商户号，复用工单审核的 `retrieveRiskChecksTicketList` 列表接口查询工单，再逐条调用 `loadSendDelayMessageView` 获取短信内容和处理链接。该模式展示工单状态而非名单状态，支持翻页；不会获取审核任务锁或提交审核，也不会发送短信。
 
 接口为 `POST /lspos/merchantCardBlackList.do?method=list`，类型按后台下拉框定义映射：身份证 `1`、银行卡 `2`、营业执照 `3`（抓包中的银行卡示例误写为 `3`）。查到记录后自动调用 `riskchecks.do?method=loadSendDelayMessageView&ticketNumber=...`，从返回页面的 `textarea#content` 提取通知内容及处理链接，并校验链接中的商户号、工单号与记录一致。每页最多 3 个链接请求并发，单条失败单独展示，不影响其他结果；支持复制处理链接或完整通知，不调用发送短信接口，不自行拼接处理链接。模块分别为 `api/risk-merchant-tickets.ts`、`tools/risk-merchant-tickets.ts`、`sidepanel/risk-merchant-tickets.ts`。
 

@@ -14,6 +14,7 @@ export const ticketReviewView = `<section id="syt-view-ticket-review" class="vie
     <button id="ticket-return" type="button">返回列表</button>
     <dl id="ticket-detail" class="ticket-detail"></dl>
     <label class="ticket-approve"><input id="ticket-approved" type="checkbox">资料审核通过</label>
+    <div id="ticket-extra-fields"></div>
     <label for="ticket-remark">备注（必填）</label><textarea id="ticket-remark" rows="4"></textarea>
     <button id="ticket-submit" class="primary" type="button" disabled>提交审核</button>
   </div>
@@ -39,7 +40,8 @@ export function initializeTicketReview(root: HTMLElement, log: LogHandler) {
     el<HTMLInputElement>('query').disabled = busy;
     el<HTMLInputElement>('approved').disabled = busy || !ready;
     el<HTMLTextAreaElement>('remark').disabled = busy || !ready;
-    el<HTMLButtonElement>('submit').disabled = busy || !ready || !el<HTMLInputElement>('approved').checked || !el<HTMLTextAreaElement>('remark').value.trim();
+    const extraComplete = Array.from(el('extra-fields').querySelectorAll<HTMLSelectElement>('select[data-review-field]')).every(select => !!select.value);
+    el<HTMLButtonElement>('submit').disabled = busy || !ready || !el<HTMLInputElement>('approved').checked || !el<HTMLTextAreaElement>('remark').value.trim() || !extraComplete;
     el<HTMLButtonElement>('prev').disabled = busy || page <= 1;
     el<HTMLButtonElement>('next').disabled = busy || !more;
     el('rows').querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = busy || button.dataset.available !== 'true'; });
@@ -95,6 +97,14 @@ export function initializeTicketReview(root: HTMLElement, log: LogHandler) {
     }
     el<HTMLInputElement>('approved').checked = false;
     el<HTMLTextAreaElement>('remark').value = '';
+    el('extra-fields').replaceChildren();
+    for (const field of session.fields) {
+      const label = document.createElement('label'); label.textContent = `${field.label}（必选）`;
+      const select = document.createElement('select'); select.dataset.reviewField = field.name; select.required = true;
+      const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = '请选择'; select.append(placeholder);
+      for (const choice of field.choices) { const option = document.createElement('option'); option.value = choice.value; option.textContent = choice.label; select.append(option); }
+      label.append(select); el('extra-fields').append(label);
+    }
     el('search').hidden = true; el('confirm').hidden = false;
     status('已获取当前审核任务，等待确认');
   };
@@ -116,11 +126,14 @@ export function initializeTicketReview(root: HTMLElement, log: LogHandler) {
   el('return').addEventListener('click', () => void run(async () => { await close(); await load(); status('工单列表已刷新'); }));
   el('approved').addEventListener('change', update);
   el('remark').addEventListener('input', update);
+  el('extra-fields').addEventListener('change', update);
   el('submit').addEventListener('click', () => void run(async () => {
     if (!session || !ready) return;
     ready = false;
     status('正在提交审核...');
-    try { status(await session.submit(el<HTMLInputElement>('approved').checked, el<HTMLTextAreaElement>('remark').value)); }
+    const selections: Record<string, string> = {};
+    el('extra-fields').querySelectorAll<HTMLSelectElement>('select[data-review-field]').forEach(select => { selections[select.dataset.reviewField!] = select.value; });
+    try { status(await session.submit(el<HTMLInputElement>('approved').checked, el<HTMLTextAreaElement>('remark').value, selections)); }
     finally {
       try { await session.close(); } catch (error) { status(`${el('status').textContent}；释放审核锁失败：${error instanceof Error ? error.message : String(error)}`, true); }
     }

@@ -18,14 +18,15 @@ it('商户号保留前导零，拒绝无效查询', () => {
 });
 it('只开放信息完整的简化通过场景', () => {
   expect(() => assertSimpleApproval(info)).not.toThrow();
-  for (const appealType of [1, 2, null]) expect(() => assertSimpleApproval({ ...info, appealType })).toThrow('后台完整');
+  for (const appealType of [1, 2, null]) expect(() => assertSimpleApproval({ ...info, appealType })).not.toThrow();
+  expect(() => assertSimpleApproval({ ...info, riskSource: 7 })).toThrow('后台完整');
   expect(() => assertSimpleApproval({ ...info, mtlVerifyStatus: 6 })).toThrow();
   expect(() => assertSimpleApproval({ ...info, merchantTxnType: '' })).toThrow();
 });
 it('通过后确认状态并释放本次锁', async () => {
   const session = new ReviewSession(row); await session.prepare();
   expect(await session.submit(true, ' 已核验 ')).toContain('审核提交成功');
-  expect(api.submitReview).toHaveBeenCalledWith(task, info, '已核验');
+  expect(api.submitReview).toHaveBeenCalledWith(task, info, '已核验', {});
   await session.close(); expect(api.releaseReview).toHaveBeenCalledWith(task);
   await expect(session.submit(true, '再次')).rejects.toThrow();
 });

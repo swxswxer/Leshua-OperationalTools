@@ -1,8 +1,69 @@
-import { ORIGIN, USER_CENTER, detectHtmlError, requestMultipartText, requestText } from './http';
+import { ORIGIN, USER_CENTER, assertMerchantId, buildFormBody, detectHtmlError, normalizeText, requestMultipartText, requestText } from './http';
 
 export interface CupsSubmissionResult {
   state: 'accepted' | 'unknown';
   message: string;
+}
+
+export interface CupsRecord {
+  importStatus: string;
+  failureReason: string;
+  merchantId: string;
+  cupsId: string;
+  channelMerchantStatus: string;
+  leshuaMerchantStatus: string;
+}
+
+export function parseCupsRecords(html: string): CupsRecord[] {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('script, style').forEach(node => node.remove());
+  if (doc.querySelector('input[type="password"]') || /登录|login/i.test(doc.title)) throw new Error('登录已失效，请先登录运营后台');
+  const required = ['导入状态', '上报失败原因', '商户编号', 'cupsID', '通道商户状态', '商户乐刷状态'];
+  const table = Array.from(doc.querySelectorAll('table')).find(candidate => {
+    const headings = Array.from(candidate.querySelectorAll('thead th')).map(th => normalizeText(th.textContent));
+    return required.every(heading => headings.includes(heading));
+  });
+  if (!table) {
+    const body = normalizeText(doc.body.textContent);
+    if (/没有该项操作权限|权限不足|无权访问/.test(body)) throw new Error('当前账号没有查询 CUPS 记录的权限');
+    throw new Error(detectHtmlError(html) || '后台返回未知页面，无法读取 CUPS 记录');
+  }
+  const headings = Array.from(table.querySelectorAll('thead th')).map(th => normalizeText(th.textContent));
+  const value = (cells: Element[], heading: string) => {
+    const cell = cells[headings.indexOf(heading)];
+    if (!cell) return '';
+    return cell.querySelector<HTMLElement>('[title]')?.title.trim() || normalizeText(cell.textContent);
+  };
+  const rows: CupsRecord[] = [];
+  table.querySelectorAll('tbody tr').forEach(tr => {
+    const cells = Array.from(tr.children);
+    const row = {
+      importStatus: value(cells, '导入状态'),
+      failureReason: value(cells, '上报失败原因'),
+      merchantId: value(cells, '商户编号'),
+      cupsId: value(cells, 'cupsID'),
+      channelMerchantStatus: value(cells, '通道商户状态'),
+      leshuaMerchantStatus: value(cells, '商户乐刷状态'),
+    };
+    if (row.merchantId) rows.push(row);
+  });
+  return rows;
+}
+
+export async function queryCupsRecords(rawMerchantId: string): Promise<CupsRecord[]> {
+  const merchantId = rawMerchantId.trim();
+  assertMerchantId(merchantId);
+  const body = buildFormBody({
+    channelTimeRange: '', status: '', merchantId, cupsId: '', license: '', agentId1g: '', spId: '', agentClass: '',
+    state: '', flag: '', merchantStatus: '', mccCode: '', merchantNature: '', reportType: '', isReuseMerchant: '',
+    addressSearch: '', province: '', city: '', area: '', beginLevel: '', endLevel: '', tradeStatus: '', pageSize: 20,
+  });
+  const html = await requestText(`${ORIGIN}/lspos/cups.do?method=channelCupsList`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body,
+  });
+  const rows = parseCupsRecords(html);
+  if (rows.some(row => row.merchantId !== merchantId)) throw new Error('后台返回了其他商户的 CUPS 记录，请核对查询条件');
+  return rows;
 }
 
 export async function getCupsApplicant(): Promise<string> {

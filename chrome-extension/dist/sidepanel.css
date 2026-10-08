@@ -109,6 +109,12 @@ h2 { font-size: calc(var(--font-title) - 1px); font-weight: 600; }
 @media (max-width: 350px) { main { padding: 16px 12px; } .app-header { padding: 12px; gap: 8px; flex-wrap: wrap; } .form-row { grid-template-columns: minmax(0,1fr); } .merchant-heading { align-items: start; } .merchant-name strong { display: block; } .optional-config summary { flex-wrap: wrap; } #syt-optional-summary { flex-basis: 100%; text-align: left; padding-left: 25px; } .tool-heading { gap: 6px; } #syt-tool-select { flex-basis: 104px; width: 104px; } }
 .status.cups-success { color: #15803d; }
 .status.cups-warning { color: #a16207; }
+.cups-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.cups-actions button { margin: 0; }
+.cups-table-wrap { margin-top: 12px; overflow-x: auto; }
+.cups-table { width: 100%; min-width: 560px; border-collapse: collapse; table-layout: fixed; font-size: var(--font-small); }
+.cups-table th, .cups-table td { padding: 8px 6px; border-bottom: 1px solid #e5e9f0; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.cups-table th { color: #566276; font-weight: 600; }
 .ticket-table-wrap { margin-top: 18px; overflow-x: auto; }
 .ticket-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: var(--font-small); }
 .ticket-table th, .ticket-table td { padding: 9px 4px; border-bottom: 1px solid #e5e9f0; text-align: left; vertical-align: top; overflow-wrap: anywhere; white-space: pre-line; }

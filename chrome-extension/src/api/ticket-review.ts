@@ -6,6 +6,8 @@ export const REVIEW_FORM = 'riskchecks_operation_manager_check';
 export interface TicketRow { ticketNumber: string; merchantId: string; merchantName: string; state: string; node: string }
 export interface TicketTask { ticketNumber: string; formKey: string; flowTaskId: string; upcomingProcessId: string }
 export interface AppealInfo { riskSource: number | string; appealType: number | string | null; mtlVerifyStatus: number | string; merchantAuthenticity: number | string; merchantTxnType: number | string }
+export interface ReviewChoice { value: string; label: string }
+export interface ReviewField { name: string; label: string; choices: ReviewChoice[] }
 
 function htmlDocument(html: string): Document {
   const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -61,7 +63,23 @@ export async function queryTask(ticketNumber: string): Promise<TicketTask> {
   }), ticketNumber);
 }
 
-export function verifyReviewPage(html: string, task: TicketTask): void {
+function reviewFieldLabel(control: Element): string {
+  const cell = control.closest('td');
+  if (cell?.previousElementSibling) return normalizeText(cell.previousElementSibling.textContent);
+  const labels = Array.from((control as HTMLInputElement).labels || []).map(label => normalizeText(label.textContent)).filter(Boolean);
+  if (labels.length) return labels.join(' / ');
+  return normalizeText(control.parentElement?.textContent);
+}
+
+function choiceLabel(control: HTMLInputElement): string {
+  const labels = Array.from(control.labels || []).map(label => normalizeText(label.textContent)).filter(Boolean);
+  if (labels.length) return labels.join(' / ');
+  const text = normalizeText(control.parentElement?.textContent);
+  const prompt = reviewFieldLabel(control);
+  return text.replace(prompt, '').trim() || control.value;
+}
+
+export function verifyReviewPage(html: string, task: TicketTask): ReviewField[] {
   const doc = htmlDocument(html);
   const form = doc.querySelector('form[action="riskchecks.do?method=verifyRiskChecksTicket"]');
   if (!form) throw new Error('无法进入审核页面，可能被其他人占用，请到后台确认');
@@ -69,11 +87,29 @@ export function verifyReviewPage(html: string, task: TicketTask): void {
     if (form.querySelector<HTMLInputElement>(`input[name="${key}"]`)?.value !== value) throw new Error('审核任务参数不一致，请重新查询');
   }
   if (!form.querySelector('input[name="materialCheckResult"][value="1"]')) throw new Error('当前工单不支持资料审核通过');
+  const fields = new Map<string, ReviewField>();
+  form.querySelectorAll<HTMLSelectElement>('select[name]').forEach(select => {
+    const label = reviewFieldLabel(select);
+    if (!/微信|支付宝/.test(label) || !/申诉/.test(label)) return;
+    const choices = Array.from(select.options).filter(option => option.value.trim()).map(option => ({ value: option.value, label: normalizeText(option.textContent) }));
+    if (choices.length) fields.set(select.name, { name: select.name, label, choices });
+  });
+  const radios = new Map<string, HTMLInputElement[]>();
+  form.querySelectorAll<HTMLInputElement>('input[type="radio"][name]').forEach(input => {
+    const group = radios.get(input.name) || []; group.push(input); radios.set(input.name, group);
+  });
+  for (const [name, inputs] of radios) {
+    const label = inputs.map(reviewFieldLabel).find(text => /微信|支付宝/.test(text) && /申诉/.test(text));
+    if (!label) continue;
+    const choices = inputs.map(input => ({ value: input.value, label: choiceLabel(input) }));
+    if (choices.length) fields.set(name, { name, label, choices });
+  }
+  return Array.from(fields.values());
 }
 
-export async function openReview(task: TicketTask): Promise<void> {
+export async function openReview(task: TicketTask): Promise<ReviewField[]> {
   const params = buildFormBody({ method: 'retrieveTicketVerificationPage', ...task });
-  verifyReviewPage(await requestText(`${BASE}ticketmanagement.do?${params}`), task);
+  return verifyReviewPage(await requestText(`${BASE}ticketmanagement.do?${params}`), task);
 }
 export function getAppealInfo(ticketNumber: string): Promise<AppealInfo> {
   return requestJson(`${BASE}riskchecks.do?method=retrieveMrtAppealDetailAndMtlType&${buildFormBody({ ticketNumber })}`);
@@ -88,10 +124,10 @@ export function assertReviewSuccess(html: string): void {
   const success = !!doc.querySelector('img[src$="/success.gif"]') && Array.from(doc.querySelectorAll('span')).some(span => /^操作成功[!！]?$/.test(normalizeText(span.textContent)));
   if (!success) throw new Error(`后台未确认审核成功：${normalizeText(doc.body.textContent).slice(0, 180) || '空响应'}`);
 }
-export async function submitReview(task: TicketTask, info: AppealInfo, remark: string): Promise<void> {
+export async function submitReview(task: TicketTask, info: AppealInfo, remark: string, choices: Record<string, string> = {}): Promise<void> {
   const html = await requestText(`${BASE}riskchecks.do?method=verifyRiskChecksTicket`, {
     headers: FORM_HEADERS,
-    method: 'POST', body: buildFormBody({ ...task, materialCheckResult: 1, appealResultName: '', appealFailureReason: '', attachments: '', unpassReason: '', remark, appealType: '', appealResult: '', nonCompliantType: '', merchantAuthenticity: info.merchantAuthenticity, merchantTxnType: info.merchantTxnType }),
+    method: 'POST', body: buildFormBody({ ...task, materialCheckResult: 1, appealResultName: '', appealFailureReason: '', attachments: '', unpassReason: '', remark, appealType: '', appealResult: '', nonCompliantType: '', merchantAuthenticity: info.merchantAuthenticity, merchantTxnType: info.merchantTxnType, ...choices }),
   });
   assertReviewSuccess(html);
 }

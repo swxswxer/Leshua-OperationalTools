@@ -17,6 +17,7 @@ import { addChangeWhitelist } from '../tools/change-whitelist';
 import { bindLatestWechatPaymentConfig } from '../tools/payment-config';
 import { saveDeviceBindConfig } from '../tools/device-bind-config';
 import { reportCups } from '../tools/cups-report';
+import { queryCupsRecords } from '../api/cups';
 import { initializeSnAuthorization, snAuthorizationView } from './sn-authorization';
 import { initializeTicketReview, ticketReviewView } from './ticket-review';
 import { initializeRiskMerchantTickets, riskMerchantTicketsView } from './risk-merchant-tickets';
@@ -90,7 +91,8 @@ function createPanel(): void {
         ${repayView}
         <section id="syt-view-cups" class="view">
           <label for="syt-cups-merchant">乐刷商户号</label><input id="syt-cups-merchant" inputmode="numeric" autocomplete="off" placeholder="10 位乐刷商户号">
-          <button id="syt-run-cups" class="primary" type="button">提交上报申请</button><div id="syt-cups-status" class="status" role="status" aria-live="polite"></div>
+          <div class="secondary-actions cups-actions"><button id="syt-query-cups" type="button">查询记录</button><button id="syt-run-cups" class="primary" type="button">提交上报申请</button></div>
+          <div id="syt-cups-status" class="status" role="status" aria-live="polite"></div><div id="syt-cups-records" class="cups-records" aria-live="polite"></div>
         </section>
         <section id="syt-view-bind-config" class="view">
           <label>乐刷 SN（必填）<span class="field-help" tabindex="0" aria-label="设备换绑配置说明" aria-describedby="syt-bind-config-help">?<span id="syt-bind-config-help" class="field-help-tooltip" role="tooltip">点击确认配置后，先按乐刷 SN 查询已有配置：有记录则修改该记录，没有记录则新增配置。查询失败时不会继续提交。</span></span><input id="syt-bind-config-sn" autocomplete="off" required></label>
@@ -479,10 +481,52 @@ function createPanel(): void {
     }
   });
   const cupsSubmit = byId<HTMLButtonElement>(root, 'syt-run-cups');
+  const cupsQuery = byId<HTMLButtonElement>(root, 'syt-query-cups');
   const cupsMerchant = byId<HTMLInputElement>(root, 'syt-cups-merchant');
   const cupsStatus = byId<HTMLElement>(root, 'syt-cups-status');
+  const cupsRecords = byId<HTMLElement>(root, 'syt-cups-records');
+  cupsQuery.addEventListener('click', async () => {
+    if (cupsQuery.disabled || cupsSubmit.disabled) return;
+    cupsQuery.disabled = true;
+    cupsSubmit.disabled = true;
+    cupsMerchant.disabled = true;
+    cupsRecords.replaceChildren();
+    setStatus(cupsStatus, '正在查询 CUPS 记录...');
+    try {
+      const rows = await queryCupsRecords(cupsMerchant.value);
+      if (!rows.length) {
+        cupsRecords.textContent = '未查询到 CUPS 记录';
+        setStatus(cupsStatus, '查询完成，未查询到记录');
+      } else {
+        const wrap = document.createElement('div'); wrap.className = 'cups-table-wrap';
+        const table = document.createElement('table'); table.className = 'cups-table';
+        const headings = ['导入状态', '上报失败原因', '商户编号', 'CUPS ID', '通道商户状态', '商户乐刷状态'];
+        const thead = document.createElement('thead'); const headerRow = document.createElement('tr');
+        headings.forEach(text => { const th = document.createElement('th'); th.textContent = text; headerRow.append(th); }); thead.append(headerRow);
+        const tbody = document.createElement('tbody');
+        rows.forEach(row => {
+          const tr = document.createElement('tr');
+          [row.importStatus, row.failureReason, row.merchantId, row.cupsId, row.channelMerchantStatus, row.leshuaMerchantStatus].forEach(text => {
+            const td = document.createElement('td'); td.textContent = text || '—'; tr.append(td);
+          });
+          tbody.append(tr);
+        });
+        table.append(thead, tbody); wrap.append(table); cupsRecords.append(wrap);
+        setStatus(cupsStatus, `查询完成，共 ${rows.length} 条记录`);
+      }
+      log(`CUPS 记录查询完成，共 ${rows.length} 条`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(cupsStatus, `CUPS 记录查询失败：${message}`, true);
+      log('CUPS 记录查询失败，请查看页面提示', true);
+    } finally {
+      cupsQuery.disabled = false;
+      cupsSubmit.disabled = false;
+      cupsMerchant.disabled = false;
+    }
+  });
   cupsSubmit.addEventListener('click', async () => {
-    if (cupsSubmit.disabled) return;
+    if (cupsSubmit.disabled || cupsQuery.disabled) return;
     cupsSubmit.disabled = true;
     cupsMerchant.disabled = true;
     cupsSubmit.textContent = '提交中...';

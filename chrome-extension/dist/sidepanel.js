@@ -2627,6 +2627,78 @@
   }
 
   // src/api/cups.ts
+  function parseCupsRecords(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    doc.querySelectorAll("script, style").forEach((node) => node.remove());
+    if (doc.querySelector('input[type="password"]') || /登录|login/i.test(doc.title)) throw new Error("\u767B\u5F55\u5DF2\u5931\u6548\uFF0C\u8BF7\u5148\u767B\u5F55\u8FD0\u8425\u540E\u53F0");
+    const required = ["\u5BFC\u5165\u72B6\u6001", "\u4E0A\u62A5\u5931\u8D25\u539F\u56E0", "\u5546\u6237\u7F16\u53F7", "cupsID", "\u901A\u9053\u5546\u6237\u72B6\u6001", "\u5546\u6237\u4E50\u5237\u72B6\u6001"];
+    const table = Array.from(doc.querySelectorAll("table")).find((candidate) => {
+      const headings2 = Array.from(candidate.querySelectorAll("thead th")).map((th) => normalizeText(th.textContent));
+      return required.every((heading) => headings2.includes(heading));
+    });
+    if (!table) {
+      const body = normalizeText(doc.body.textContent);
+      if (/没有该项操作权限|权限不足|无权访问/.test(body)) throw new Error("\u5F53\u524D\u8D26\u53F7\u6CA1\u6709\u67E5\u8BE2 CUPS \u8BB0\u5F55\u7684\u6743\u9650");
+      throw new Error(detectHtmlError(html) || "\u540E\u53F0\u8FD4\u56DE\u672A\u77E5\u9875\u9762\uFF0C\u65E0\u6CD5\u8BFB\u53D6 CUPS \u8BB0\u5F55");
+    }
+    const headings = Array.from(table.querySelectorAll("thead th")).map((th) => normalizeText(th.textContent));
+    const value = (cells, heading) => {
+      const cell = cells[headings.indexOf(heading)];
+      if (!cell) return "";
+      return cell.querySelector("[title]")?.title.trim() || normalizeText(cell.textContent);
+    };
+    const rows = [];
+    table.querySelectorAll("tbody tr").forEach((tr) => {
+      const cells = Array.from(tr.children);
+      const row = {
+        importStatus: value(cells, "\u5BFC\u5165\u72B6\u6001"),
+        failureReason: value(cells, "\u4E0A\u62A5\u5931\u8D25\u539F\u56E0"),
+        merchantId: value(cells, "\u5546\u6237\u7F16\u53F7"),
+        cupsId: value(cells, "cupsID"),
+        channelMerchantStatus: value(cells, "\u901A\u9053\u5546\u6237\u72B6\u6001"),
+        leshuaMerchantStatus: value(cells, "\u5546\u6237\u4E50\u5237\u72B6\u6001")
+      };
+      if (row.merchantId) rows.push(row);
+    });
+    return rows;
+  }
+  async function queryCupsRecords(rawMerchantId) {
+    const merchantId = rawMerchantId.trim();
+    assertMerchantId(merchantId);
+    const body = buildFormBody({
+      channelTimeRange: "",
+      status: "",
+      merchantId,
+      cupsId: "",
+      license: "",
+      agentId1g: "",
+      spId: "",
+      agentClass: "",
+      state: "",
+      flag: "",
+      merchantStatus: "",
+      mccCode: "",
+      merchantNature: "",
+      reportType: "",
+      isReuseMerchant: "",
+      addressSearch: "",
+      province: "",
+      city: "",
+      area: "",
+      beginLevel: "",
+      endLevel: "",
+      tradeStatus: "",
+      pageSize: 20
+    });
+    const html = await requestText(`${ORIGIN}/lspos/cups.do?method=channelCupsList`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+      body
+    });
+    const rows = parseCupsRecords(html);
+    if (rows.some((row) => row.merchantId !== merchantId)) throw new Error("\u540E\u53F0\u8FD4\u56DE\u4E86\u5176\u4ED6\u5546\u6237\u7684 CUPS \u8BB0\u5F55\uFF0C\u8BF7\u6838\u5BF9\u67E5\u8BE2\u6761\u4EF6");
+    return rows;
+  }
   async function getCupsApplicant() {
     const html = await requestText(`${USER_CENTER}/userInfo.do?method=loaddata`, { cache: "no-store", timeoutMs: 15e3 });
     const doc = new DOMParser().parseFromString(html, "text/html");
@@ -2956,6 +3028,20 @@
       body: buildFormBody({ ticketNumber, prodefid: "ticket_risk_management_risk_checks", upcomingVerify: 0, riskChecksJoinTableFlag: 1, pageSize: 200 })
     }), ticketNumber);
   }
+  function reviewFieldLabel(control) {
+    const cell = control.closest("td");
+    if (cell?.previousElementSibling) return normalizeText(cell.previousElementSibling.textContent);
+    const labels = Array.from(control.labels || []).map((label) => normalizeText(label.textContent)).filter(Boolean);
+    if (labels.length) return labels.join(" / ");
+    return normalizeText(control.parentElement?.textContent);
+  }
+  function choiceLabel(control) {
+    const labels = Array.from(control.labels || []).map((label) => normalizeText(label.textContent)).filter(Boolean);
+    if (labels.length) return labels.join(" / ");
+    const text = normalizeText(control.parentElement?.textContent);
+    const prompt = reviewFieldLabel(control);
+    return text.replace(prompt, "").trim() || control.value;
+  }
   function verifyReviewPage(html, task) {
     const doc = htmlDocument(html);
     const form = doc.querySelector('form[action="riskchecks.do?method=verifyRiskChecksTicket"]');
@@ -2964,10 +3050,30 @@
       if (form.querySelector(`input[name="${key}"]`)?.value !== value) throw new Error("\u5BA1\u6838\u4EFB\u52A1\u53C2\u6570\u4E0D\u4E00\u81F4\uFF0C\u8BF7\u91CD\u65B0\u67E5\u8BE2");
     }
     if (!form.querySelector('input[name="materialCheckResult"][value="1"]')) throw new Error("\u5F53\u524D\u5DE5\u5355\u4E0D\u652F\u6301\u8D44\u6599\u5BA1\u6838\u901A\u8FC7");
+    const fields = /* @__PURE__ */ new Map();
+    form.querySelectorAll("select[name]").forEach((select) => {
+      const label = reviewFieldLabel(select);
+      if (!/微信|支付宝/.test(label) || !/申诉/.test(label)) return;
+      const choices = Array.from(select.options).filter((option) => option.value.trim()).map((option) => ({ value: option.value, label: normalizeText(option.textContent) }));
+      if (choices.length) fields.set(select.name, { name: select.name, label, choices });
+    });
+    const radios = /* @__PURE__ */ new Map();
+    form.querySelectorAll('input[type="radio"][name]').forEach((input) => {
+      const group = radios.get(input.name) || [];
+      group.push(input);
+      radios.set(input.name, group);
+    });
+    for (const [name, inputs] of radios) {
+      const label = inputs.map(reviewFieldLabel).find((text) => /微信|支付宝/.test(text) && /申诉/.test(text));
+      if (!label) continue;
+      const choices = inputs.map((input) => ({ value: input.value, label: choiceLabel(input) }));
+      if (choices.length) fields.set(name, { name, label, choices });
+    }
+    return Array.from(fields.values());
   }
   async function openReview(task) {
     const params = buildFormBody({ method: "retrieveTicketVerificationPage", ...task });
-    verifyReviewPage(await requestText(`${BASE}ticketmanagement.do?${params}`), task);
+    return verifyReviewPage(await requestText(`${BASE}ticketmanagement.do?${params}`), task);
   }
   function getAppealInfo(ticketNumber) {
     return requestJson(`${BASE}riskchecks.do?method=retrieveMrtAppealDetailAndMtlType&${buildFormBody({ ticketNumber })}`);
@@ -2985,11 +3091,11 @@
     const success = !!doc.querySelector('img[src$="/success.gif"]') && Array.from(doc.querySelectorAll("span")).some((span) => /^操作成功[!！]?$/.test(normalizeText(span.textContent)));
     if (!success) throw new Error(`\u540E\u53F0\u672A\u786E\u8BA4\u5BA1\u6838\u6210\u529F\uFF1A${normalizeText(doc.body.textContent).slice(0, 180) || "\u7A7A\u54CD\u5E94"}`);
   }
-  async function submitReview(task, info, remark) {
+  async function submitReview(task, info, remark, choices = {}) {
     const html = await requestText(`${BASE}riskchecks.do?method=verifyRiskChecksTicket`, {
       headers: FORM_HEADERS2,
       method: "POST",
-      body: buildFormBody({ ...task, materialCheckResult: 1, appealResultName: "", appealFailureReason: "", attachments: "", unpassReason: "", remark, appealType: "", appealResult: "", nonCompliantType: "", merchantAuthenticity: info.merchantAuthenticity, merchantTxnType: info.merchantTxnType })
+      body: buildFormBody({ ...task, materialCheckResult: 1, appealResultName: "", appealFailureReason: "", attachments: "", unpassReason: "", remark, appealType: "", appealResult: "", nonCompliantType: "", merchantAuthenticity: info.merchantAuthenticity, merchantTxnType: info.merchantTxnType, ...choices })
     });
     assertReviewSuccess(html);
   }
@@ -3002,13 +3108,14 @@
   }
   function assertSimpleApproval(info) {
     if (!info || !["1", "2"].includes(String(info.merchantAuthenticity)) || !["1", "2"].includes(String(info.merchantTxnType)) || !["1", "2", "3", "4", "5", "6"].includes(String(info.riskSource)) || info.mtlVerifyStatus == null) throw new Error("\u5DE5\u5355\u4FE1\u606F\u4E0D\u5B8C\u6574\uFF0C\u8BF7\u5728\u540E\u53F0\u5B8C\u6574\u5BA1\u6838\u9875\u9762\u5904\u7406");
-    if (String(info.mtlVerifyStatus) === "6" || ["2", "3"].includes(String(info.riskSource)) && String(info.appealType) !== "3") throw new Error("\u6B64\u5DE5\u5355\u6D89\u53CA\u989D\u5916\u7533\u8BC9\u4FE1\u606F\u6216\u7EBF\u4E0B\u8D44\u6599\uFF0C\u8BF7\u5728\u540E\u53F0\u5B8C\u6574\u5BA1\u6838\u9875\u9762\u5904\u7406");
+    if (String(info.mtlVerifyStatus) === "6") throw new Error("\u6B64\u5DE5\u5355\u6D89\u53CA\u7EBF\u4E0B\u8D44\u6599\uFF0C\u8BF7\u5728\u540E\u53F0\u5B8C\u6574\u5BA1\u6838\u9875\u9762\u5904\u7406");
   }
   var ReviewSession = class {
     constructor(row) {
       this.row = row;
     }
     task;
+    fields = [];
     attempted = false;
     submitting = false;
     async prepare() {
@@ -3016,12 +3123,17 @@
       const row = current.rows.find((row2) => row2.ticketNumber === this.row.ticketNumber);
       if (!row || row.merchantId !== this.row.merchantId || row.state !== "\u5904\u7406\u4E2D" || row.node !== "\u8FD0\u8425\u5BA1\u6838") throw new Error("\u5DE5\u5355\u5DF2\u53D8\u66F4\u6216\u4E0D\u5904\u4E8E\u8FD0\u8425\u5BA1\u6838\uFF0C\u8BF7\u5237\u65B0\u5217\u8868");
       const task = await queryTask(row.ticketNumber);
-      await openReview(task);
+      this.fields = await openReview(task) || [];
       this.task = task;
-      assertSimpleApproval(await getAppealInfo(row.ticketNumber));
+      const info = await getAppealInfo(row.ticketNumber);
+      assertSimpleApproval(info);
+      if (["2", "3"].includes(String(info.riskSource)) && String(info.appealType) !== "3" && !this.fields.length) {
+        throw new Error("\u540E\u53F0\u5BA1\u6838\u9875\u672A\u8FD4\u56DE\u5FAE\u4FE1/\u652F\u4ED8\u5B9D\u7533\u8BC9\u7ED3\u679C\u9009\u9879\uFF0C\u8BF7\u5728\u540E\u53F0\u5B8C\u6574\u5BA1\u6838\u9875\u9762\u5904\u7406");
+      }
     }
-    async submit(approved, remark) {
+    async submit(approved, remark, selections = {}) {
       if (!approved || !remark.trim()) throw new Error("\u8BF7\u52FE\u9009\u8D44\u6599\u5BA1\u6838\u901A\u8FC7\u5E76\u586B\u5199\u5907\u6CE8");
+      for (const field of this.fields) if (!field.choices.some((choice) => choice.value === selections[field.name])) throw new Error(`\u8BF7\u9009\u62E9${field.label}`);
       if (!this.task || this.attempted || this.submitting) throw new Error("\u672C\u6B21\u5BA1\u6838\u4E0D\u53EF\u91CD\u590D\u63D0\u4EA4\uFF0C\u8BF7\u5237\u65B0\u5DE5\u5355\u786E\u8BA4\u72B6\u6001");
       this.submitting = true;
       try {
@@ -3031,7 +3143,7 @@
         assertSimpleApproval(info);
         this.attempted = true;
         try {
-          await submitReview(this.task, info, remark.trim());
+          await submitReview(this.task, info, remark.trim(), selections);
         } catch (error) {
           throw new Error(`${error instanceof Error ? error.message : String(error)}\u3002\u8BF7\u5237\u65B0\u5DE5\u5355\u786E\u8BA4\u7ED3\u679C\uFF0C\u52FF\u76F4\u63A5\u91CD\u590D\u5BA1\u6838`);
         }
@@ -3067,6 +3179,7 @@
     <button id="ticket-return" type="button">\u8FD4\u56DE\u5217\u8868</button>
     <dl id="ticket-detail" class="ticket-detail"></dl>
     <label class="ticket-approve"><input id="ticket-approved" type="checkbox">\u8D44\u6599\u5BA1\u6838\u901A\u8FC7</label>
+    <div id="ticket-extra-fields"></div>
     <label for="ticket-remark">\u5907\u6CE8\uFF08\u5FC5\u586B\uFF09</label><textarea id="ticket-remark" rows="4"></textarea>
     <button id="ticket-submit" class="primary" type="button" disabled>\u63D0\u4EA4\u5BA1\u6838</button>
   </div>
@@ -3091,7 +3204,8 @@
       el("query").disabled = busy;
       el("approved").disabled = busy || !ready;
       el("remark").disabled = busy || !ready;
-      el("submit").disabled = busy || !ready || !el("approved").checked || !el("remark").value.trim();
+      const extraComplete = Array.from(el("extra-fields").querySelectorAll("select[data-review-field]")).every((select) => !!select.value);
+      el("submit").disabled = busy || !ready || !el("approved").checked || !el("remark").value.trim() || !extraComplete;
       el("prev").disabled = busy || page <= 1;
       el("next").disabled = busy || !more;
       el("rows").querySelectorAll("button").forEach((button) => {
@@ -3177,6 +3291,26 @@ ${row.node}`]) {
       }
       el("approved").checked = false;
       el("remark").value = "";
+      el("extra-fields").replaceChildren();
+      for (const field of session.fields) {
+        const label = document.createElement("label");
+        label.textContent = `${field.label}\uFF08\u5FC5\u9009\uFF09`;
+        const select = document.createElement("select");
+        select.dataset.reviewField = field.name;
+        select.required = true;
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "\u8BF7\u9009\u62E9";
+        select.append(placeholder);
+        for (const choice of field.choices) {
+          const option = document.createElement("option");
+          option.value = choice.value;
+          option.textContent = choice.label;
+          select.append(option);
+        }
+        label.append(select);
+        el("extra-fields").append(label);
+      }
       el("search").hidden = true;
       el("confirm").hidden = false;
       status("\u5DF2\u83B7\u53D6\u5F53\u524D\u5BA1\u6838\u4EFB\u52A1\uFF0C\u7B49\u5F85\u786E\u8BA4");
@@ -3214,12 +3348,17 @@ ${row.node}`]) {
     }));
     el("approved").addEventListener("change", update);
     el("remark").addEventListener("input", update);
+    el("extra-fields").addEventListener("change", update);
     el("submit").addEventListener("click", () => void run(async () => {
       if (!session || !ready) return;
       ready = false;
       status("\u6B63\u5728\u63D0\u4EA4\u5BA1\u6838...");
+      const selections = {};
+      el("extra-fields").querySelectorAll("select[data-review-field]").forEach((select) => {
+        selections[select.dataset.reviewField] = select.value;
+      });
       try {
-        status(await session.submit(el("approved").checked, el("remark").value));
+        status(await session.submit(el("approved").checked, el("remark").value, selections));
       } finally {
         try {
           await session.close();
@@ -3317,18 +3456,37 @@ ${row.node}`]) {
     return results;
   }
   function searchRiskMerchantTickets(type, number, page = 1) {
-    if (!["1", "2", "3"].includes(type)) throw new Error("\u8BF7\u9009\u62E9\u8EAB\u4EFD\u8BC1\u3001\u8425\u4E1A\u6267\u7167\u6216\u94F6\u884C\u5361\u53F7");
+    if (!["1", "2", "3", "merchant"].includes(type)) throw new Error("\u8BF7\u9009\u62E9\u8EAB\u4EFD\u8BC1\u3001\u8425\u4E1A\u6267\u7167\u3001\u94F6\u884C\u5361\u53F7\u6216\u5546\u6237\u53F7");
     const value = number.trim();
     if (!value) throw new Error("\u8BF7\u8F93\u5165\u67E5\u8BE2\u53F7\u7801");
     if (!/^[a-zA-Z0-9]+$/.test(value)) throw new Error("\u67E5\u8BE2\u53F7\u7801\u53EA\u80FD\u5305\u542B\u6570\u5B57\u6216\u82F1\u6587\u5B57\u6BCD");
     if (!Number.isSafeInteger(page) || page < 1) throw new Error("\u67E5\u8BE2\u9875\u7801\u4E0D\u6B63\u786E");
-    return queryRiskTickets(type, value, page);
+    if (type === "merchant") {
+      if (!/^\d{10}$/.test(value)) throw new Error("\u8BF7\u8F93\u516510\u4F4D\u6570\u5B57\u4E50\u5237\u5546\u6237\u53F7");
+      return queryTickets("merchant", value, page).then((result) => ({
+        rows: result.rows.map((row) => ({
+          merchantId: row.merchantId,
+          ticketNumber: row.ticketNumber,
+          node: row.node,
+          status: row.state,
+          created: "",
+          cardType: "",
+          maskedNumber: "",
+          operator: ""
+        })),
+        page,
+        pages: null,
+        total: null,
+        more: result.more
+      }));
+    }
+    return queryRiskTickets(type, value, page).then((result) => ({ ...result, more: result.page < result.pages }));
   }
 
   // src/sidepanel/risk-merchant-tickets.ts
   var riskMerchantTicketsView = `<section id="syt-view-risk-tickets" class="view">
   <form id="risk-search-form">
-    <label for="risk-card-type">\u67E5\u8BE2\u7C7B\u578B</label><select id="risk-card-type"><option value="1">\u8EAB\u4EFD\u8BC1</option><option value="3">\u8425\u4E1A\u6267\u7167</option><option value="2">\u94F6\u884C\u5361\u53F7</option></select>
+    <label for="risk-card-type">\u67E5\u8BE2\u7C7B\u578B</label><select id="risk-card-type"><option value="1">\u8EAB\u4EFD\u8BC1</option><option value="3">\u8425\u4E1A\u6267\u7167</option><option value="2">\u94F6\u884C\u5361\u53F7</option><option value="merchant">\u5546\u6237\u53F7</option></select>
     <label for="risk-card-number" id="risk-number-label">\u8EAB\u4EFD\u8BC1\u53F7</label><input id="risk-card-number" autocomplete="off" spellcheck="false" required>
     <button id="risk-search" class="primary" type="submit">\u67E5\u8BE2\u98CE\u9669\u5546\u6237\u5DE5\u5355</button>
   </form>
@@ -3342,16 +3500,16 @@ ${row.node}`]) {
     const input = get("card-number");
     let busy = false;
     let page = 1;
-    let pages = 0;
+    let more = false;
     let query;
     const controls = () => {
       type.disabled = input.disabled = get("search").disabled = busy;
       get("prev").disabled = busy || page <= 1 || !query;
-      get("next").disabled = busy || page >= pages || !query;
+      get("next").disabled = busy || !more || !query;
     };
     const clear = () => {
       query = void 0;
-      pages = 0;
+      more = false;
       page = 1;
       get("results").replaceChildren();
       get("status").textContent = "";
@@ -3360,7 +3518,7 @@ ${row.node}`]) {
     };
     type.addEventListener("change", () => {
       clear();
-      get("number-label").textContent = { "1": "\u8EAB\u4EFD\u8BC1\u53F7", "2": "\u94F6\u884C\u5361\u53F7", "3": "\u8425\u4E1A\u6267\u7167\u53F7" }[type.value];
+      get("number-label").textContent = { "1": "\u8EAB\u4EFD\u8BC1\u53F7", "2": "\u94F6\u884C\u5361\u53F7", "3": "\u8425\u4E1A\u6267\u7167\u53F7", merchant: "\u4E50\u5237\u5546\u6237\u53F7" }[type.value];
     });
     input.addEventListener("input", clear);
     const search = async (target, fresh = false) => {
@@ -3377,7 +3535,7 @@ ${row.node}`]) {
         const result = await searchRiskMerchantTickets(current.type, current.number, target);
         query = current;
         page = result.page;
-        pages = result.pages;
+        more = result.more;
         if (result.rows.length) get("status").textContent = `\u67E5\u5230 ${result.rows.length} \u6761\u8BB0\u5F55\uFF0C\u6B63\u5728\u83B7\u53D6\u5904\u7406\u94FE\u63A5...`;
         const rows = await loadRiskHandlingLinks(result.rows);
         for (const row of rows) {
@@ -3388,7 +3546,8 @@ ${row.node}`]) {
           section.append(heading);
           const dl = document.createElement("dl");
           dl.className = "ticket-detail";
-          for (const [label, text] of [["\u5546\u6237\u53F7", row.merchantId], ["\u5F53\u524D\u8282\u70B9", row.node], ["\u540D\u5355\u72B6\u6001", row.status], ["\u8BC1\u4EF6\u7C7B\u578B", row.cardType], ["\u8BC1\u4EF6\u53F7\u7801", row.maskedNumber], ["\u521B\u5EFA\u65F6\u95F4", row.created], ["\u64CD\u4F5C\u4EBA", row.operator]]) {
+          const details = current.type === "merchant" ? [["\u5546\u6237\u53F7", row.merchantId], ["\u5F53\u524D\u8282\u70B9", row.node], ["\u5DE5\u5355\u72B6\u6001", row.status]] : [["\u5546\u6237\u53F7", row.merchantId], ["\u5F53\u524D\u8282\u70B9", row.node], ["\u540D\u5355\u72B6\u6001", row.status], ["\u8BC1\u4EF6\u7C7B\u578B", row.cardType], ["\u8BC1\u4EF6\u53F7\u7801", row.maskedNumber], ["\u521B\u5EFA\u65F6\u95F4", row.created], ["\u64CD\u4F5C\u4EBA", row.operator]];
+          for (const [label, text] of details) {
             const dt = document.createElement("dt");
             dt.textContent = label;
             const dd = document.createElement("dd");
@@ -3435,15 +3594,16 @@ ${row.node}`]) {
           }
           get("results").append(section);
         }
-        get("page").textContent = `\u7B2C ${page} / ${Math.max(pages, 1)} \u9875`;
+        get("page").textContent = result.pages === null ? `\u7B2C ${page} \u9875` : `\u7B2C ${page} / ${Math.max(result.pages, 1)} \u9875`;
         const failures = rows.filter((row) => !row.handling).length;
-        const message = result.rows.length ? `\u67E5\u8BE2\u5B8C\u6210\uFF0C\u5171 ${result.total} \u6761\u8BB0\u5F55\uFF1B\u672C\u9875 ${rows.length - failures} \u4E2A\u5904\u7406\u94FE\u63A5${failures ? `\uFF0C${failures} \u6761\u83B7\u53D6\u5931\u8D25` : ""}` : "\u672A\u67E5\u8BE2\u5230\u5339\u914D\u8BB0\u5F55";
+        const count = result.total === null ? `\u672C\u9875 ${rows.length} \u6761\u8BB0\u5F55` : `\u5171 ${result.total} \u6761\u8BB0\u5F55`;
+        const message = result.rows.length ? `\u67E5\u8BE2\u5B8C\u6210\uFF0C${count}\uFF1B\u672C\u9875 ${rows.length - failures} \u4E2A\u5904\u7406\u94FE\u63A5${failures ? `\uFF0C${failures} \u6761\u83B7\u53D6\u5931\u8D25` : ""}` : "\u672A\u67E5\u8BE2\u5230\u5339\u914D\u8BB0\u5F55";
         get("status").textContent = message;
         get("status").className = failures ? "status error" : "status";
         log(`\u98CE\u9669\u5546\u6237\u5DE5\u5355\uFF1A${message}`, failures > 0);
       } catch (error) {
         query = void 0;
-        pages = 0;
+        more = false;
         get("status").textContent = error instanceof Error ? error.message : "\u67E5\u8BE2\u5931\u8D25";
         get("status").className = "status error";
         log("\u98CE\u9669\u5546\u6237\u5DE5\u5355\u67E5\u8BE2\u5931\u8D25\uFF0C\u8BF7\u67E5\u770B\u67E5\u8BE2\u9875\u9762\u63D0\u793A", true);
@@ -3950,7 +4110,8 @@ ${row.node}`]) {
         ${repayView}
         <section id="syt-view-cups" class="view">
           <label for="syt-cups-merchant">\u4E50\u5237\u5546\u6237\u53F7</label><input id="syt-cups-merchant" inputmode="numeric" autocomplete="off" placeholder="10 \u4F4D\u4E50\u5237\u5546\u6237\u53F7">
-          <button id="syt-run-cups" class="primary" type="button">\u63D0\u4EA4\u4E0A\u62A5\u7533\u8BF7</button><div id="syt-cups-status" class="status" role="status" aria-live="polite"></div>
+          <div class="secondary-actions cups-actions"><button id="syt-query-cups" type="button">\u67E5\u8BE2\u8BB0\u5F55</button><button id="syt-run-cups" class="primary" type="button">\u63D0\u4EA4\u4E0A\u62A5\u7533\u8BF7</button></div>
+          <div id="syt-cups-status" class="status" role="status" aria-live="polite"></div><div id="syt-cups-records" class="cups-records" aria-live="polite"></div>
         </section>
         <section id="syt-view-bind-config" class="view">
           <label>\u4E50\u5237 SN\uFF08\u5FC5\u586B\uFF09<span class="field-help" tabindex="0" aria-label="\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E\u8BF4\u660E" aria-describedby="syt-bind-config-help">?<span id="syt-bind-config-help" class="field-help-tooltip" role="tooltip">\u70B9\u51FB\u786E\u8BA4\u914D\u7F6E\u540E\uFF0C\u5148\u6309\u4E50\u5237 SN \u67E5\u8BE2\u5DF2\u6709\u914D\u7F6E\uFF1A\u6709\u8BB0\u5F55\u5219\u4FEE\u6539\u8BE5\u8BB0\u5F55\uFF0C\u6CA1\u6709\u8BB0\u5F55\u5219\u65B0\u589E\u914D\u7F6E\u3002\u67E5\u8BE2\u5931\u8D25\u65F6\u4E0D\u4F1A\u7EE7\u7EED\u63D0\u4EA4\u3002</span></span><input id="syt-bind-config-sn" autocomplete="off" required></label>
@@ -4358,10 +4519,64 @@ ${row.node}`]) {
       }
     });
     const cupsSubmit = byId(root, "syt-run-cups");
+    const cupsQuery = byId(root, "syt-query-cups");
     const cupsMerchant = byId(root, "syt-cups-merchant");
     const cupsStatus = byId(root, "syt-cups-status");
+    const cupsRecords = byId(root, "syt-cups-records");
+    cupsQuery.addEventListener("click", async () => {
+      if (cupsQuery.disabled || cupsSubmit.disabled) return;
+      cupsQuery.disabled = true;
+      cupsSubmit.disabled = true;
+      cupsMerchant.disabled = true;
+      cupsRecords.replaceChildren();
+      setStatus(cupsStatus, "\u6B63\u5728\u67E5\u8BE2 CUPS \u8BB0\u5F55...");
+      try {
+        const rows = await queryCupsRecords(cupsMerchant.value);
+        if (!rows.length) {
+          cupsRecords.textContent = "\u672A\u67E5\u8BE2\u5230 CUPS \u8BB0\u5F55";
+          setStatus(cupsStatus, "\u67E5\u8BE2\u5B8C\u6210\uFF0C\u672A\u67E5\u8BE2\u5230\u8BB0\u5F55");
+        } else {
+          const wrap = document.createElement("div");
+          wrap.className = "cups-table-wrap";
+          const table = document.createElement("table");
+          table.className = "cups-table";
+          const headings = ["\u5BFC\u5165\u72B6\u6001", "\u4E0A\u62A5\u5931\u8D25\u539F\u56E0", "\u5546\u6237\u7F16\u53F7", "CUPS ID", "\u901A\u9053\u5546\u6237\u72B6\u6001", "\u5546\u6237\u4E50\u5237\u72B6\u6001"];
+          const thead = document.createElement("thead");
+          const headerRow = document.createElement("tr");
+          headings.forEach((text) => {
+            const th = document.createElement("th");
+            th.textContent = text;
+            headerRow.append(th);
+          });
+          thead.append(headerRow);
+          const tbody = document.createElement("tbody");
+          rows.forEach((row) => {
+            const tr = document.createElement("tr");
+            [row.importStatus, row.failureReason, row.merchantId, row.cupsId, row.channelMerchantStatus, row.leshuaMerchantStatus].forEach((text) => {
+              const td2 = document.createElement("td");
+              td2.textContent = text || "\u2014";
+              tr.append(td2);
+            });
+            tbody.append(tr);
+          });
+          table.append(thead, tbody);
+          wrap.append(table);
+          cupsRecords.append(wrap);
+          setStatus(cupsStatus, `\u67E5\u8BE2\u5B8C\u6210\uFF0C\u5171 ${rows.length} \u6761\u8BB0\u5F55`);
+        }
+        log(`CUPS \u8BB0\u5F55\u67E5\u8BE2\u5B8C\u6210\uFF0C\u5171 ${rows.length} \u6761`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setStatus(cupsStatus, `CUPS \u8BB0\u5F55\u67E5\u8BE2\u5931\u8D25\uFF1A${message}`, true);
+        log("CUPS \u8BB0\u5F55\u67E5\u8BE2\u5931\u8D25\uFF0C\u8BF7\u67E5\u770B\u9875\u9762\u63D0\u793A", true);
+      } finally {
+        cupsQuery.disabled = false;
+        cupsSubmit.disabled = false;
+        cupsMerchant.disabled = false;
+      }
+    });
     cupsSubmit.addEventListener("click", async () => {
-      if (cupsSubmit.disabled) return;
+      if (cupsSubmit.disabled || cupsQuery.disabled) return;
       cupsSubmit.disabled = true;
       cupsMerchant.disabled = true;
       cupsSubmit.textContent = "\u63D0\u4EA4\u4E2D...";
