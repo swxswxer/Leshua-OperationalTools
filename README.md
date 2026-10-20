@@ -36,6 +36,7 @@ Edge 商店上传包使用 `npm run package:edge` 生成 `leshua-operations-edge
 - 自定义渠道重置：填写完整的渠道号和渠道主体后，统一执行上报、确认新号启用与旧号关闭流程。
 - 微信支付参数绑定：可对新号或商户最新微信映射记录绑定 appid、支付授权目录。
 - 配置商户 key：与重置页共用乐刷商户号输入框，支持使用英文 `;` 分隔任意数量的商户号；内部最多同时处理 5 个请求。
+- 商户注销：使用重置页同一商户号输入框，支持英文 `;` 分隔多个 10 位商户号，自动忽略空项并拒绝重复或格式错误的号码；连续两次确认后按输入顺序逐个 POST `merchantInfoManager.do?method=merchantLogOff`，表单参数为 `merchantId` 和 `reason=1`。单个请求失败后继续处理其余商户，并逐项显示结果。超时或后台响应不明确时标记为待确认，需先核实状态，避免重复注销请求。
 - 码牌划转、防切户白名单、收银通机具划拨、联合收单机具划拨：分别作为独立工具页面。联合收单机具划拨只需填写 SN、旧代理商编号和新代理商编号。
 - 设备换绑配置：独立页面输入乐刷 SN、单日/单月最大绑定次数（留空默认 3）和结算主体白名单（默认是）。先查询精确匹配的 SN 配置，有记录则修改，无记录则新增；修改保留原累计最大商户数和累计最大绑定次数。查询失败、记录不唯一或存在多页时停止，不自动新增。新增依据 JSON 的 `success: true`，修改依据 HTML 的“操作成功”确认结果；保存请求不自动重试。
 - 插件 1.0.5 新增设备换绑配置，接口与业务分别位于 `src/api/device-bind-config.ts` 和 `src/tools/device-bind-config.ts`。
@@ -68,6 +69,7 @@ chrome-extension/src/
 │   ├── notification-status.ts   # 子商户号状态确认与启用/禁用接口
 │   ├── payment-config.ts        # appid/支付授权目录绑定接口
 │   ├── merchant-key.ts          # 商户 key 接口
+│   ├── merchant-logoff.ts       # 商户注销接口
 │   ├── code-plate.ts            # 码牌模板、上传及消息查询接口
 │   ├── whitelist.ts             # 防切户白名单接口
 │   ├── device-transfer.ts       # 机具代理查询及划拨接口
@@ -99,7 +101,7 @@ chrome-extension/src/
 - [`chrome-extension/src/api/quick-report.ts`](/Users/swxswx/Desktop/work/code/Report-Tampermonkey/chrome-extension/src/api/quick-report.ts)：收银通与联合收单共用的默认批量重置接口。
 - `api/mapping.ts`、`api/report.ts`、`api/notification-status.ts`、`api/payment-config.ts`：映射查询、自定义渠道上报、通知状态和微信支付参数接口。
 - `api/merchant-key.ts`、`api/code-plate.ts`、`api/whitelist.ts`、`api/device-transfer.ts`：各独立后台能力的接口实现。
-- [`chrome-extension/src/tools`](/Users/swxswx/Desktop/work/code/Report-Tampermonkey/chrome-extension/src/tools)：业务流程层，负责组合 API，包括批量重置、自定义渠道重置、参数绑定、商户 key、码牌、白名单和机具划拨。
+- [`chrome-extension/src/tools`](/Users/swxswx/Desktop/work/code/Report-Tampermonkey/chrome-extension/src/tools)：业务流程层，负责组合 API，包括批量重置、自定义渠道重置、参数绑定、商户 key、商户注销、码牌、白名单和机具划拨。
 - [`chrome-extension/src/types.ts`](/Users/swxswx/Desktop/work/code/Report-Tampermonkey/chrome-extension/src/types.ts)：跨模块共用类型，避免 API 层依赖界面层。
 
 修改后应在 `chrome-extension/` 下运行类型检查、测试和构建，再到扩展管理页点击“重新加载”。

@@ -17,6 +17,7 @@ import { addChangeWhitelist } from '../tools/change-whitelist';
 import { bindLatestWechatPaymentConfig } from '../tools/payment-config';
 import { saveDeviceBindConfig } from '../tools/device-bind-config';
 import { reportCups } from '../tools/cups-report';
+import { logOffMerchants } from '../tools/merchant-logoff';
 import { queryCupsRecords } from '../api/cups';
 import { initializeSnAuthorization, snAuthorizationView } from './sn-authorization';
 import { initializeTicketReview, ticketReviewView } from './ticket-review';
@@ -81,7 +82,7 @@ function createPanel(): void {
           <div class="section-title">微信支付参数（可选）</div><label>appid<input id="syt-appid" autocomplete="off"></label><label>支付授权目录<input id="syt-jsapi-paths" autocomplete="off"></label>
           </div></details>
           <button id="syt-run-reset" class="primary" type="button">执行重置</button>
-          <div class="secondary-actions"><button id="syt-run-payment-config" type="button">配置绑定</button><button id="syt-run-key" type="button">配置商户 key</button></div>
+          <div class="secondary-actions merchant-actions"><button id="syt-run-payment-config" type="button">配置绑定</button><button id="syt-run-key" type="button">配置商户 key</button><button id="syt-run-merchant-logoff" type="button">注销商户</button></div>
           <div id="syt-reset-status" class="status" role="status"></div>
           <section class="results-section" aria-label="本次结果"><div class="results-heading"><h2>本次结果</h2><button id="syt-copy" class="text-button" type="button" disabled>${icon('copy')}复制全部</button></div><div id="syt-results"><p class="empty">暂无重置结果</p></div></section>
         </section>
@@ -134,6 +135,7 @@ function createPanel(): void {
   const runReset = byId<HTMLButtonElement>(root, 'syt-run-reset');
   const runPaymentConfig = byId<HTMLButtonElement>(root, 'syt-run-payment-config');
   const runKey = byId<HTMLButtonElement>(root, 'syt-run-key');
+  const runMerchantLogoff = byId<HTMLButtonElement>(root, 'syt-run-merchant-logoff');
   const resetStatus = byId<HTMLElement>(root, 'syt-reset-status');
   const resultBody = byId<HTMLElement>(root, 'syt-results');
   const copyButton = byId<HTMLButtonElement>(root, 'syt-copy');
@@ -164,6 +166,7 @@ function createPanel(): void {
     runReset.disabled = next;
     runPaymentConfig.disabled = next;
     runKey.disabled = next;
+    runMerchantLogoff.disabled = next;
     root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('#syt-view-reset input, #syt-view-reset select').forEach((control) => { control.disabled = next; });
     clearMerchant.disabled = next;
     runReset.textContent = next ? '处理中...' : '执行重置';
@@ -343,6 +346,64 @@ function createPanel(): void {
       const message = error instanceof Error ? error.message : String(error);
       setStatus(resetStatus, message, true);
       log(`配置商户 key 失败: ${message}`, true);
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  runMerchantLogoff.addEventListener('click', async () => {
+    if (busy) return;
+    let merchantIds: string[];
+    try {
+      merchantIds = parseMerchantKeyIds(resetInput.value);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(resetStatus, message, true);
+      log(`商户注销未发起: ${message}`, true);
+      return;
+    }
+
+    const merchantList = merchantIds.join('\n');
+    if (!window.confirm(`即将注销 ${merchantIds.length} 个商户：\n${merchantList}\n\n注销会影响商户后续业务，请确认已核对商户号及注销条件。\n\n是否继续？`)) {
+      setStatus(resetStatus, '已取消商户注销');
+      return;
+    }
+    if (!window.confirm(`最后确认：确定注销以上 ${merchantIds.length} 个商户？此操作可能无法撤销。\n\n${merchantList}`)) {
+      setStatus(resetStatus, '已取消商户注销');
+      return;
+    }
+
+    setBusy(true);
+    resetStatus.replaceChildren();
+    resetStatus.className = 'status';
+    const progress = document.createElement('p');
+    progress.textContent = `正在逐个注销 ${merchantIds.length} 个商户...`;
+    const resultList = document.createElement('div');
+    resetStatus.append(progress, resultList);
+    log(`开始批量注销 ${merchantIds.length} 个商户`);
+    try {
+      const results = await logOffMerchants(merchantIds, (result, completed, total) => {
+        const line = document.createElement('p');
+        line.textContent = result.ok
+          ? `商户 ${result.merchantId}：注销成功${result.message ? `（${result.message}）` : ''}`
+          : `商户 ${result.merchantId}：注销失败/待确认：${result.error}`;
+        if (!result.ok) line.className = 'error';
+        resultList.append(line);
+        progress.textContent = `注销处理中 ${completed}/${total}`;
+        log(result.ok
+          ? `商户 ${result.merchantId} 注销成功${result.message ? `：${result.message}` : ''}`
+          : `商户 ${result.merchantId} 注销失败/待确认：${result.error}`, !result.ok);
+      });
+      const successCount = results.filter((result) => result.ok).length;
+      const failureCount = results.length - successCount;
+      progress.textContent = `批量注销完成：成功 ${successCount} 个，失败/待确认 ${failureCount} 个`;
+      if (failureCount > 0) progress.className = 'error';
+      log(`批量注销完成：成功 ${successCount} 个，失败/待确认 ${failureCount} 个`, failureCount > 0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      progress.textContent = `批量注销失败：${message}`;
+      progress.className = 'error';
+      log(`批量注销失败：${message}`, true);
     } finally {
       setBusy(false);
     }

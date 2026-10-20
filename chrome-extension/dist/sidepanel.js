@@ -2778,6 +2778,57 @@
     return submitCupsApplication(file, applicant);
   }
 
+  // src/api/merchant-logoff.ts
+  function responseMessage(response) {
+    return [response.errMsg, response.error_msg, response.respMsg, response.msg].find((value) => typeof value === "string" && value.trim())?.trim() || "";
+  }
+  async function logOffMerchant(rawMerchantId) {
+    const merchantId = rawMerchantId.trim();
+    assertMerchantId(merchantId);
+    let response;
+    try {
+      response = await requestJson(`${ORIGIN}/lspos/merchantInfoManager.do?method=merchantLogOff`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+        body: buildFormBody({ merchantId, reason: "1" }),
+        timeoutMs: 2e4
+      });
+    } catch (error) {
+      throw new Error(`\u6CE8\u9500\u7ED3\u679C\u5F85\u786E\u8BA4\uFF0C\u8BF7\u5148\u5230\u540E\u53F0\u6838\u5B9E\u5546\u6237 ${merchantId} \u7684\u72B6\u6001\uFF0C\u52FF\u76F4\u63A5\u91CD\u590D\u63D0\u4EA4\uFF1A${error instanceof Error ? error.message : String(error)}`);
+    }
+    const message = responseMessage(response);
+    if (response.fail === true || response.success === false || response.code != null && !["1", "0"].includes(String(response.code)) || response.respCode != null && String(response.respCode) !== "0") {
+      throw new Error(message || "\u540E\u53F0\u62D2\u7EDD\u4E86\u5546\u6237\u6CE8\u9500\u8BF7\u6C42");
+    }
+    if (response.success === true || String(response.code) === "1" || String(response.respCode) === "0" || /注销成功|操作成功/.test(message)) {
+      return message || "\u540E\u53F0\u5DF2\u786E\u8BA4\u6CE8\u9500\u6210\u529F";
+    }
+    if (String(response.code) === "0") throw new Error(message || "\u540E\u53F0\u6CE8\u9500\u5931\u8D25");
+    throw new Error(`\u540E\u53F0\u54CD\u5E94\u672A\u660E\u786E\u786E\u8BA4\u6CE8\u9500\u7ED3\u679C\uFF0C\u8BF7\u5230\u540E\u53F0\u6838\u5B9E\u5546\u6237 ${merchantId} \u72B6\u6001\uFF1A${message || "\u54CD\u5E94\u7F3A\u5C11\u6210\u529F\u6807\u8BB0"}`);
+  }
+
+  // src/tools/merchant-logoff.ts
+  function validateMerchantLogoffId(rawMerchantId) {
+    const merchantId = rawMerchantId.trim();
+    assertMerchantId(merchantId);
+    return merchantId;
+  }
+  async function logOffMerchants(merchantIds, onResult) {
+    const validatedIds = merchantIds.map(validateMerchantLogoffId);
+    const results = [];
+    for (const merchantId of validatedIds) {
+      let result;
+      try {
+        result = { merchantId, ok: true, message: await logOffMerchant(merchantId) };
+      } catch (error) {
+        result = { merchantId, ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+      results.push(result);
+      onResult?.(result, results.length, validatedIds.length);
+    }
+    return results;
+  }
+
   // src/api/sn-authorization.ts
   var ENDPOINT2 = `${ORIGIN}/base-business/pinpad/agentWhiteList.do`;
   function parseHtml(html) {
@@ -4110,7 +4161,7 @@ ${row.node}`]) {
           <div class="section-title">\u5FAE\u4FE1\u652F\u4ED8\u53C2\u6570\uFF08\u53EF\u9009\uFF09</div><label>appid<input id="syt-appid" autocomplete="off"></label><label>\u652F\u4ED8\u6388\u6743\u76EE\u5F55<input id="syt-jsapi-paths" autocomplete="off"></label>
           </div></details>
           <button id="syt-run-reset" class="primary" type="button">\u6267\u884C\u91CD\u7F6E</button>
-          <div class="secondary-actions"><button id="syt-run-payment-config" type="button">\u914D\u7F6E\u7ED1\u5B9A</button><button id="syt-run-key" type="button">\u914D\u7F6E\u5546\u6237 key</button></div>
+          <div class="secondary-actions merchant-actions"><button id="syt-run-payment-config" type="button">\u914D\u7F6E\u7ED1\u5B9A</button><button id="syt-run-key" type="button">\u914D\u7F6E\u5546\u6237 key</button><button id="syt-run-merchant-logoff" type="button">\u6CE8\u9500\u5546\u6237</button></div>
           <div id="syt-reset-status" class="status" role="status"></div>
           <section class="results-section" aria-label="\u672C\u6B21\u7ED3\u679C"><div class="results-heading"><h2>\u672C\u6B21\u7ED3\u679C</h2><button id="syt-copy" class="text-button" type="button" disabled>${icon("copy")}\u590D\u5236\u5168\u90E8</button></div><div id="syt-results"><p class="empty">\u6682\u65E0\u91CD\u7F6E\u7ED3\u679C</p></div></section>
         </section>
@@ -4162,6 +4213,7 @@ ${row.node}`]) {
     const runReset = byId(root, "syt-run-reset");
     const runPaymentConfig = byId(root, "syt-run-payment-config");
     const runKey = byId(root, "syt-run-key");
+    const runMerchantLogoff = byId(root, "syt-run-merchant-logoff");
     const resetStatus = byId(root, "syt-reset-status");
     const resultBody = byId(root, "syt-results");
     const copyButton = byId(root, "syt-copy");
@@ -4191,6 +4243,7 @@ ${row.node}`]) {
       runReset.disabled = next;
       runPaymentConfig.disabled = next;
       runKey.disabled = next;
+      runMerchantLogoff.disabled = next;
       root.querySelectorAll("#syt-view-reset input, #syt-view-reset select").forEach((control) => {
         control.disabled = next;
       });
@@ -4385,6 +4438,64 @@ ${row.node}`]) {
         const message = error instanceof Error ? error.message : String(error);
         setStatus(resetStatus, message, true);
         log(`\u914D\u7F6E\u5546\u6237 key \u5931\u8D25: ${message}`, true);
+      } finally {
+        setBusy(false);
+      }
+    });
+    runMerchantLogoff.addEventListener("click", async () => {
+      if (busy) return;
+      let merchantIds;
+      try {
+        merchantIds = parseMerchantKeyIds(resetInput.value);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setStatus(resetStatus, message, true);
+        log(`\u5546\u6237\u6CE8\u9500\u672A\u53D1\u8D77: ${message}`, true);
+        return;
+      }
+      const merchantList = merchantIds.join("\n");
+      if (!window.confirm(`\u5373\u5C06\u6CE8\u9500 ${merchantIds.length} \u4E2A\u5546\u6237\uFF1A
+${merchantList}
+
+\u6CE8\u9500\u4F1A\u5F71\u54CD\u5546\u6237\u540E\u7EED\u4E1A\u52A1\uFF0C\u8BF7\u786E\u8BA4\u5DF2\u6838\u5BF9\u5546\u6237\u53F7\u53CA\u6CE8\u9500\u6761\u4EF6\u3002
+
+\u662F\u5426\u7EE7\u7EED\uFF1F`)) {
+        setStatus(resetStatus, "\u5DF2\u53D6\u6D88\u5546\u6237\u6CE8\u9500");
+        return;
+      }
+      if (!window.confirm(`\u6700\u540E\u786E\u8BA4\uFF1A\u786E\u5B9A\u6CE8\u9500\u4EE5\u4E0A ${merchantIds.length} \u4E2A\u5546\u6237\uFF1F\u6B64\u64CD\u4F5C\u53EF\u80FD\u65E0\u6CD5\u64A4\u9500\u3002
+
+${merchantList}`)) {
+        setStatus(resetStatus, "\u5DF2\u53D6\u6D88\u5546\u6237\u6CE8\u9500");
+        return;
+      }
+      setBusy(true);
+      resetStatus.replaceChildren();
+      resetStatus.className = "status";
+      const progress = document.createElement("p");
+      progress.textContent = `\u6B63\u5728\u9010\u4E2A\u6CE8\u9500 ${merchantIds.length} \u4E2A\u5546\u6237...`;
+      const resultList = document.createElement("div");
+      resetStatus.append(progress, resultList);
+      log(`\u5F00\u59CB\u6279\u91CF\u6CE8\u9500 ${merchantIds.length} \u4E2A\u5546\u6237`);
+      try {
+        const results = await logOffMerchants(merchantIds, (result, completed, total) => {
+          const line = document.createElement("p");
+          line.textContent = result.ok ? `\u5546\u6237 ${result.merchantId}\uFF1A\u6CE8\u9500\u6210\u529F${result.message ? `\uFF08${result.message}\uFF09` : ""}` : `\u5546\u6237 ${result.merchantId}\uFF1A\u6CE8\u9500\u5931\u8D25/\u5F85\u786E\u8BA4\uFF1A${result.error}`;
+          if (!result.ok) line.className = "error";
+          resultList.append(line);
+          progress.textContent = `\u6CE8\u9500\u5904\u7406\u4E2D ${completed}/${total}`;
+          log(result.ok ? `\u5546\u6237 ${result.merchantId} \u6CE8\u9500\u6210\u529F${result.message ? `\uFF1A${result.message}` : ""}` : `\u5546\u6237 ${result.merchantId} \u6CE8\u9500\u5931\u8D25/\u5F85\u786E\u8BA4\uFF1A${result.error}`, !result.ok);
+        });
+        const successCount = results.filter((result) => result.ok).length;
+        const failureCount = results.length - successCount;
+        progress.textContent = `\u6279\u91CF\u6CE8\u9500\u5B8C\u6210\uFF1A\u6210\u529F ${successCount} \u4E2A\uFF0C\u5931\u8D25/\u5F85\u786E\u8BA4 ${failureCount} \u4E2A`;
+        if (failureCount > 0) progress.className = "error";
+        log(`\u6279\u91CF\u6CE8\u9500\u5B8C\u6210\uFF1A\u6210\u529F ${successCount} \u4E2A\uFF0C\u5931\u8D25/\u5F85\u786E\u8BA4 ${failureCount} \u4E2A`, failureCount > 0);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        progress.textContent = `\u6279\u91CF\u6CE8\u9500\u5931\u8D25\uFF1A${message}`;
+        progress.className = "error";
+        log(`\u6279\u91CF\u6CE8\u9500\u5931\u8D25\uFF1A${message}`, true);
       } finally {
         setBusy(false);
       }

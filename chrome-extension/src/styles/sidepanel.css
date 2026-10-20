@@ -69,8 +69,11 @@ summary::-webkit-details-marker { display: none; }
 .primary:hover { background: #1d4ed8; border-color: #1d4ed8; }
 #syt-run-reset { margin-top: 0; }
 .secondary-actions { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 8px; margin-top: 8px; }
+.merchant-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.merchant-actions button { min-width: 0; padding: 7px 5px; overflow-wrap: anywhere; }
 .status { margin-top: 14px; color: #16844b; font-size: var(--font-small); overflow-wrap: anywhere; }
 .status:empty { display: none; }
+.status > p { margin: 6px 0; }
 .error { color: #c73939 !important; }
 .success, .copied { color: #16844b !important; }
 .pending { color: #9d6818; }
