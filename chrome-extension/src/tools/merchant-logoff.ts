@@ -1,5 +1,10 @@
 import { assertMerchantId } from '../api/http';
+import { parseMerchantIdList } from '../api/merchant-id';
 import { logOffMerchant as sendMerchantLogoff } from '../api/merchant-logoff';
+
+export function parseMerchantLogoffIds(raw: string): string[] {
+  return parseMerchantIdList(raw);
+}
 
 export function validateMerchantLogoffId(rawMerchantId: string): string {
   const merchantId = rawMerchantId.trim();

@@ -161,16 +161,23 @@
     return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
   }
 
-  // src/api/quick-report.ts
-  function parseMerchantIds(raw) {
-    const merchantIds = raw.split(";").map((item) => item.trim()).filter(Boolean);
+  // src/api/merchant-id.ts
+  function parseMerchantIdList(raw, options = {}) {
+    const merchantIds = raw.split(/[;；,，\s]+/).map((item) => item.trim()).filter(Boolean);
     if (merchantIds.length === 0) throw new Error("\u8BF7\u81F3\u5C11\u8F93\u5165\u4E00\u4E2A\u4E50\u5237\u5546\u6237\u53F7");
-    if (merchantIds.length > 5) throw new Error("\u4E00\u6B21\u6700\u591A\u91CD\u7F6E 5 \u4E2A\u4E50\u5237\u5546\u6237\u53F7");
-    const duplicates = merchantIds.filter((item, index) => merchantIds.indexOf(item) !== index);
-    if (duplicates.length > 0) throw new Error(`\u4E50\u5237\u5546\u6237\u53F7\u91CD\u590D: ${duplicates[0]}`);
+    if (options.maxCount != null && merchantIds.length > options.maxCount) {
+      throw new Error(options.maxCountMessage || `\u4E00\u6B21\u6700\u591A\u5904\u7406 ${options.maxCount} \u4E2A\u4E50\u5237\u5546\u6237\u53F7`);
+    }
+    const duplicates = merchantIds.find((item, index) => merchantIds.indexOf(item) !== index);
+    if (duplicates) throw new Error(`\u4E50\u5237\u5546\u6237\u53F7\u91CD\u590D: ${duplicates}`);
     const invalid = merchantIds.find((item) => !/^\d{10}$/.test(item));
     if (invalid) throw new Error(`\u4E50\u5237\u5546\u6237\u53F7\u5FC5\u987B\u662F 10 \u4F4D\u6570\u5B57: ${invalid}`);
     return merchantIds;
+  }
+
+  // src/api/quick-report.ts
+  function parseMerchantIds(raw) {
+    return parseMerchantIdList(raw, { maxCount: 5, maxCountMessage: "\u4E00\u6B21\u6700\u591A\u91CD\u7F6E 5 \u4E2A\u4E50\u5237\u5546\u6237\u53F7" });
   }
   function isRequested(type, channel) {
     return type === "ALL" || type === "WECHAT" && channel === "wechat" || type === "ALIPAY" && channel === "alipay";
@@ -974,13 +981,7 @@
   // src/tools/merchant-key.ts
   var CONCURRENCY = 5;
   function parseMerchantKeyIds(raw) {
-    const merchantIds = raw.split(";").map((item) => item.trim()).filter(Boolean);
-    if (!merchantIds.length) throw new Error("\u8BF7\u81F3\u5C11\u8F93\u5165\u4E00\u4E2A\u4E50\u5237\u5546\u6237\u53F7");
-    const duplicates = merchantIds.filter((item, index) => merchantIds.indexOf(item) !== index);
-    if (duplicates.length) throw new Error(`\u4E50\u5237\u5546\u6237\u53F7\u91CD\u590D: ${duplicates[0]}`);
-    const invalid = merchantIds.find((item) => !/^\d{10}$/.test(item));
-    if (invalid) throw new Error(`\u4E50\u5237\u5546\u6237\u53F7\u5FC5\u987B\u662F 10 \u4F4D\u6570\u5B57: ${invalid}`);
-    return merchantIds;
+    return parseMerchantIdList(raw);
   }
   async function configureMerchantKeys(merchantIds, log) {
     log(`\u5F00\u59CB\u6279\u91CF\u914D\u7F6E ${merchantIds.length} \u4E2A\u5546\u6237\u7684 key`);
@@ -2808,6 +2809,9 @@
   }
 
   // src/tools/merchant-logoff.ts
+  function parseMerchantLogoffIds(raw) {
+    return parseMerchantIdList(raw);
+  }
   function validateMerchantLogoffId(rawMerchantId) {
     const merchantId = rawMerchantId.trim();
     assertMerchantId(merchantId);
@@ -4154,7 +4158,7 @@ ${row.node}`]) {
         <div class="tool-heading"><div><button id="syt-back" class="icon-button" type="button" title="\u8FD4\u56DE\u91CD\u7F6E\u9875\u9762" aria-label="\u8FD4\u56DE\u91CD\u7F6E\u9875\u9762">${icon("back")}</button><h1 id="syt-title">\u5B50\u5546\u6237\u53F7\u91CD\u7F6E</h1></div><select id="syt-tool-select" aria-label="\u5207\u6362\u5DE5\u5177"><option value="" disabled selected>\u5207\u6362\u5DE5\u5177</option><option value="reset">\u5B50\u5546\u6237\u53F7\u91CD\u7F6E</option><option value="code">\u7801\u724C\u5212\u8F6C</option><option value="device">\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8</option><option value="lhsd-device">\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8</option><option value="whitelist">\u9632\u5207\u6237\u767D\u540D\u5355</option><option value="bind-config">\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E</option></select></div>
         <section id="syt-view-reset" class="view active">
           <fieldset class="segmented business-line"><legend class="sr-only">\u91CD\u7F6E\u4E1A\u52A1\u7EBF</legend><label><input type="radio" name="syt-business-line" value="syt" checked>\u6536\u94F6\u901A</label><label><input type="radio" name="syt-business-line" value="lhsd">\u8054\u5408\u6536\u5355</label></fieldset>
-          <label for="syt-merchant-ids">\u4E50\u5237\u5546\u6237\u53F7</label><div class="input-clear"><input id="syt-merchant-ids" placeholder="\u591A\u4E2A\u5546\u6237\u53F7\u4EE5 ; \u5206\u9694" autocomplete="off" aria-describedby="syt-merchant-hint"><button id="syt-clear-merchant" type="button" class="icon-button" title="\u6E05\u7A7A\u5546\u6237\u53F7" aria-label="\u6E05\u7A7A\u5546\u6237\u53F7">${icon("close")}</button></div><div id="syt-merchant-hint" class="field-hint" aria-live="polite">\u91CD\u7F6E\u6700\u591A 5 \u4E2A \xB7 \u914D\u7F6E key \u4E0D\u9650\u6570\u91CF</div>
+          <label for="syt-merchant-ids">\u4E50\u5237\u5546\u6237\u53F7</label><div class="input-clear"><input id="syt-merchant-ids" placeholder="\u591A\u4E2A\u5546\u6237\u53F7\u7528\u5206\u53F7\u3001\u9017\u53F7\u3001\u7A7A\u683C\u6216\u6362\u884C\u5206\u9694" autocomplete="off" aria-describedby="syt-merchant-hint"><button id="syt-clear-merchant" type="button" class="icon-button" title="\u6E05\u7A7A\u5546\u6237\u53F7" aria-label="\u6E05\u7A7A\u5546\u6237\u53F7">${icon("close")}</button></div><div id="syt-merchant-hint" class="field-hint" aria-live="polite">\u91CD\u7F6E\u6700\u591A 5 \u4E2A \xB7 \u914D\u7F6E key \u4E0D\u9650\u6570\u91CF</div>
           <fieldset class="segmented report-channels"><legend class="sr-only">\u91CD\u7F6E\u901A\u9053</legend><label><input type="radio" name="syt-report-type" value="WECHAT">\u5FAE\u4FE1</label><label><input type="radio" name="syt-report-type" value="ALIPAY">\u652F\u4ED8\u5B9D</label><label><input type="radio" name="syt-report-type" value="ALL" checked>\u5168\u90E8</label></fieldset>
           <details id="syt-optional-config" class="optional-config"><summary>${icon("chevron")}<span>\u53EF\u9009\u914D\u7F6E</span><span id="syt-optional-summary">\u6E20\u9053 \xB7 appid \xB7 \u6388\u6743\u76EE\u5F55</span></summary><div class="optional-content"><label>\u4E0A\u62A5\u9884\u8BBE<select id="syt-preset">${PRESETS.map((preset2, index) => `<option value="${index}">${preset2.name}</option>`).join("")}</select></label>
           <div id="syt-channel-options" class="optional-options"><div class="section-title">\u53EF\u9009\u4E0A\u62A5\u6E20\u9053</div><div class="form-row"><label>\u5FAE\u4FE1\u6E20\u9053\u53F7<input id="syt-wx-channel-id" autocomplete="off"></label><label>\u5FAE\u4FE1\u6E20\u9053\u4E3B\u4F53<input id="syt-wx-channel-name" autocomplete="off"></label></div><div class="form-row"><label>\u652F\u4ED8\u5B9D\u6E20\u9053\u53F7<input id="syt-alipay-channel-id" autocomplete="off"></label><label>\u652F\u4ED8\u5B9D\u6E20\u9053\u4E3B\u4F53<input id="syt-alipay-channel-name" autocomplete="off"></label></div></div>
@@ -4307,11 +4311,11 @@ ${row.node}`]) {
       updateOptionalSummary();
     };
     const updateMerchantHint = () => {
-      const ids = resetInput.value.split(";").map((value) => value.trim()).filter(Boolean);
+      const ids = resetInput.value.split(/[;；,，\s]+/).map((value) => value.trim()).filter(Boolean);
       let message = ids.length ? `\u5DF2\u8BC6\u522B ${ids.length} \u4E2A\u5546\u6237 \xB7 \u91CD\u7F6E\u6700\u591A 5 \u4E2A` : "\u91CD\u7F6E\u6700\u591A 5 \u4E2A \xB7 \u914D\u7F6E key \u4E0D\u9650\u6570\u91CF";
       let invalid = false;
       if (ids.some((id) => !/^\d{10}$/.test(id))) {
-        message = "\u5546\u6237\u53F7\u9700\u4E3A 10 \u4F4D\u6570\u5B57\uFF0C\u591A\u4E2A\u4EE5\u82F1\u6587 ; \u5206\u9694";
+        message = "\u5546\u6237\u53F7\u9700\u4E3A 10 \u4F4D\u6570\u5B57\uFF1B\u53EF\u7528\u5206\u53F7\u3001\u9017\u53F7\u3001\u7A7A\u683C\u6216\u6362\u884C\u5206\u9694";
         invalid = true;
       } else if (new Set(ids).size !== ids.length) {
         message = "\u5B58\u5728\u91CD\u590D\u5546\u6237\u53F7\uFF0C\u8BF7\u68C0\u67E5";
@@ -4446,7 +4450,7 @@ ${row.node}`]) {
       if (busy) return;
       let merchantIds;
       try {
-        merchantIds = parseMerchantKeyIds(resetInput.value);
+        merchantIds = parseMerchantLogoffIds(resetInput.value);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         setStatus(resetStatus, message, true);

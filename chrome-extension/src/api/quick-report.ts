@@ -1,4 +1,5 @@
 import { ORIGIN, requestText } from './http';
+import { parseMerchantIdList } from './merchant-id';
 
 export type ReportType = 'WECHAT' | 'ALIPAY' | 'ALL';
 export type ChannelName = 'wechat' | 'alipay';
@@ -47,14 +48,7 @@ interface QuickReportResponse {
 }
 
 export function parseMerchantIds(raw: string): string[] {
-  const merchantIds = raw.split(';').map((item) => item.trim()).filter(Boolean);
-  if (merchantIds.length === 0) throw new Error('请至少输入一个乐刷商户号');
-  if (merchantIds.length > 5) throw new Error('一次最多重置 5 个乐刷商户号');
-  const duplicates = merchantIds.filter((item, index) => merchantIds.indexOf(item) !== index);
-  if (duplicates.length > 0) throw new Error(`乐刷商户号重复: ${duplicates[0]}`);
-  const invalid = merchantIds.find((item) => !/^\d{10}$/.test(item));
-  if (invalid) throw new Error(`乐刷商户号必须是 10 位数字: ${invalid}`);
-  return merchantIds;
+  return parseMerchantIdList(raw, { maxCount: 5, maxCountMessage: '一次最多重置 5 个乐刷商户号' });
 }
 
 export function isRequested(type: ReportType, channel: ChannelName): boolean {

@@ -1,5 +1,6 @@
 import type { LogHandler } from '../types';
 import { configureMerchantKey as configureMerchantKeyRequest, queryMerchantKey } from '../api/merchant-key';
+import { parseMerchantIdList } from '../api/merchant-id';
 
 const CONCURRENCY = 5;
 
@@ -12,13 +13,7 @@ export interface MerchantKeyBatchResult {
 }
 
 export function parseMerchantKeyIds(raw: string): string[] {
-  const merchantIds = raw.split(';').map((item) => item.trim()).filter(Boolean);
-  if (!merchantIds.length) throw new Error('请至少输入一个乐刷商户号');
-  const duplicates = merchantIds.filter((item, index) => merchantIds.indexOf(item) !== index);
-  if (duplicates.length) throw new Error(`乐刷商户号重复: ${duplicates[0]}`);
-  const invalid = merchantIds.find((item) => !/^\d{10}$/.test(item));
-  if (invalid) throw new Error(`乐刷商户号必须是 10 位数字: ${invalid}`);
-  return merchantIds;
+  return parseMerchantIdList(raw);
 }
 
 export async function configureMerchantKeys(

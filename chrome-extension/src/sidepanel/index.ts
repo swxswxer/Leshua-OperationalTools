@@ -17,7 +17,7 @@ import { addChangeWhitelist } from '../tools/change-whitelist';
 import { bindLatestWechatPaymentConfig } from '../tools/payment-config';
 import { saveDeviceBindConfig } from '../tools/device-bind-config';
 import { reportCups } from '../tools/cups-report';
-import { logOffMerchants } from '../tools/merchant-logoff';
+import { logOffMerchants, parseMerchantLogoffIds } from '../tools/merchant-logoff';
 import { queryCupsRecords } from '../api/cups';
 import { initializeSnAuthorization, snAuthorizationView } from './sn-authorization';
 import { initializeTicketReview, ticketReviewView } from './ticket-review';
@@ -75,7 +75,7 @@ function createPanel(): void {
         <div class="tool-heading"><div><button id="syt-back" class="icon-button" type="button" title="返回重置页面" aria-label="返回重置页面">${icon('back')}</button><h1 id="syt-title">子商户号重置</h1></div><select id="syt-tool-select" aria-label="切换工具"><option value="" disabled selected>切换工具</option><option value="reset">子商户号重置</option><option value="code">码牌划转</option><option value="device">收银通机具划拨</option><option value="lhsd-device">联合收单机具划拨</option><option value="whitelist">防切户白名单</option><option value="bind-config">设备换绑配置</option></select></div>
         <section id="syt-view-reset" class="view active">
           <fieldset class="segmented business-line"><legend class="sr-only">重置业务线</legend><label><input type="radio" name="syt-business-line" value="syt" checked>收银通</label><label><input type="radio" name="syt-business-line" value="lhsd">联合收单</label></fieldset>
-          <label for="syt-merchant-ids">乐刷商户号</label><div class="input-clear"><input id="syt-merchant-ids" placeholder="多个商户号以 ; 分隔" autocomplete="off" aria-describedby="syt-merchant-hint"><button id="syt-clear-merchant" type="button" class="icon-button" title="清空商户号" aria-label="清空商户号">${icon('close')}</button></div><div id="syt-merchant-hint" class="field-hint" aria-live="polite">重置最多 5 个 · 配置 key 不限数量</div>
+          <label for="syt-merchant-ids">乐刷商户号</label><div class="input-clear"><input id="syt-merchant-ids" placeholder="多个商户号用分号、逗号、空格或换行分隔" autocomplete="off" aria-describedby="syt-merchant-hint"><button id="syt-clear-merchant" type="button" class="icon-button" title="清空商户号" aria-label="清空商户号">${icon('close')}</button></div><div id="syt-merchant-hint" class="field-hint" aria-live="polite">重置最多 5 个 · 配置 key 不限数量</div>
           <fieldset class="segmented report-channels"><legend class="sr-only">重置通道</legend><label><input type="radio" name="syt-report-type" value="WECHAT">微信</label><label><input type="radio" name="syt-report-type" value="ALIPAY">支付宝</label><label><input type="radio" name="syt-report-type" value="ALL" checked>全部</label></fieldset>
           <details id="syt-optional-config" class="optional-config"><summary>${icon('chevron')}<span>可选配置</span><span id="syt-optional-summary">渠道 · appid · 授权目录</span></summary><div class="optional-content"><label>上报预设<select id="syt-preset">${PRESETS.map((preset, index) => `<option value="${index}">${preset.name}</option>`).join('')}</select></label>
           <div id="syt-channel-options" class="optional-options"><div class="section-title">可选上报渠道</div><div class="form-row"><label>微信渠道号<input id="syt-wx-channel-id" autocomplete="off"></label><label>微信渠道主体<input id="syt-wx-channel-name" autocomplete="off"></label></div><div class="form-row"><label>支付宝渠道号<input id="syt-alipay-channel-id" autocomplete="off"></label><label>支付宝渠道主体<input id="syt-alipay-channel-name" autocomplete="off"></label></div></div>
@@ -222,10 +222,10 @@ function createPanel(): void {
     updateOptionalSummary();
   };
   const updateMerchantHint = () => {
-    const ids = resetInput.value.split(';').map((value) => value.trim()).filter(Boolean);
+    const ids = resetInput.value.split(/[;；,，\s]+/).map((value) => value.trim()).filter(Boolean);
     let message = ids.length ? `已识别 ${ids.length} 个商户 · 重置最多 5 个` : '重置最多 5 个 · 配置 key 不限数量';
     let invalid = false;
-    if (ids.some((id) => !/^\d{10}$/.test(id))) { message = '商户号需为 10 位数字，多个以英文 ; 分隔'; invalid = true; }
+    if (ids.some((id) => !/^\d{10}$/.test(id))) { message = '商户号需为 10 位数字；可用分号、逗号、空格或换行分隔'; invalid = true; }
     else if (new Set(ids).size !== ids.length) { message = '存在重复商户号，请检查'; invalid = true; }
     else if (ids.length > 5) message = `已识别 ${ids.length} 个商户 · 仅配置 key 支持超过 5 个`;
     merchantHint.textContent = message;
@@ -355,7 +355,7 @@ function createPanel(): void {
     if (busy) return;
     let merchantIds: string[];
     try {
-      merchantIds = parseMerchantKeyIds(resetInput.value);
+      merchantIds = parseMerchantLogoffIds(resetInput.value);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatus(resetStatus, message, true);
