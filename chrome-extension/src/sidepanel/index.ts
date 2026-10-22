@@ -76,6 +76,7 @@ function createPanel(): void {
         <section id="syt-view-reset" class="view active">
           <fieldset class="segmented business-line"><legend class="sr-only">重置业务线</legend><label><input type="radio" name="syt-business-line" value="syt" checked>收银通</label><label><input type="radio" name="syt-business-line" value="lhsd">联合收单</label></fieldset>
           <label for="syt-merchant-ids">乐刷商户号</label><div class="input-clear"><input id="syt-merchant-ids" placeholder="多个商户号用分号、逗号、空格或换行分隔" autocomplete="off" aria-describedby="syt-merchant-hint"><button id="syt-clear-merchant" type="button" class="icon-button" title="清空商户号" aria-label="清空商户号">${icon('close')}</button></div><div id="syt-merchant-hint" class="field-hint" aria-live="polite">重置最多 5 个 · 配置 key 不限数量</div>
+          <label class="legacy-reset-toggle"><input id="syt-disable-old-submch" type="checkbox" checked><span>是否禁用旧子商户号</span></label><div class="field-hint">取消勾选后强制走旧流程，且不会自动禁用旧子商户号。</div>
           <fieldset class="segmented report-channels"><legend class="sr-only">重置通道</legend><label><input type="radio" name="syt-report-type" value="WECHAT">微信</label><label><input type="radio" name="syt-report-type" value="ALIPAY">支付宝</label><label><input type="radio" name="syt-report-type" value="ALL" checked>全部</label></fieldset>
           <details id="syt-optional-config" class="optional-config"><summary>${icon('chevron')}<span>可选配置</span><span id="syt-optional-summary">渠道 · appid · 授权目录</span></summary><div class="optional-content"><label>上报预设<select id="syt-preset">${PRESETS.map((preset, index) => `<option value="${index}">${preset.name}</option>`).join('')}</select></label>
           <div id="syt-channel-options" class="optional-options"><div class="section-title">可选上报渠道</div><div class="form-row"><label>微信渠道号<input id="syt-wx-channel-id" autocomplete="off"></label><label>微信渠道主体<input id="syt-wx-channel-name" autocomplete="off"></label></div><div class="form-row"><label>支付宝渠道号<input id="syt-alipay-channel-id" autocomplete="off"></label><label>支付宝渠道主体<input id="syt-alipay-channel-name" autocomplete="off"></label></div></div>
@@ -123,6 +124,7 @@ function createPanel(): void {
   toolSelect.add(new Option('重出打款单', 'repay'));
   const clearMerchant = byId<HTMLButtonElement>(root, 'syt-clear-merchant');
   const merchantHint = byId<HTMLElement>(root, 'syt-merchant-hint');
+  const disableOldSubMch = byId<HTMLInputElement>(root, 'syt-disable-old-submch');
   const optionalConfig = byId<HTMLDetailsElement>(root, 'syt-optional-config');
   const preset = byId<HTMLSelectElement>(root, 'syt-preset');
   const channelOptions = byId<HTMLElement>(root, 'syt-channel-options');
@@ -175,7 +177,7 @@ function createPanel(): void {
     channelId: wxChannelId.value.trim(), channelName: wxChannelName.value.trim(),
     sourcePid: alipayChannelId.value.trim(), sourceName: alipayChannelName.value.trim(),
     subAppids: appids.value.trim(), jsapiPaths: jsapiPaths.value.trim(),
-    disableOldSubMch: true,
+    disableOldSubMch: disableOldSubMch.checked,
   });
   const selectedBusinessLine = (): 'syt' | 'lhsd' => businessLineInputs.find((input) => input.checked)?.value === 'lhsd' ? 'lhsd' : 'syt';
   const renderResults = (results: MerchantReportResult[]) => {
@@ -269,9 +271,11 @@ function createPanel(): void {
       resetRunning = true;
       renderResults([]);
       const useCustomChannel = hasCustomChannel(options);
-      setStatus(resetStatus, useCustomChannel ? `正在处理${businessLineName(businessLine)}自定义渠道重置` : `正在调用${businessLineName(businessLine)}批量重置接口`);
-      log(`开始${businessLineName(businessLine)}${useCustomChannel ? '自定义渠道' : '批量'}重置: ${merchantIds.join('；')}`);
-      const results = useCustomChannel
+      const useLegacyFlow = useCustomChannel || !options.disableOldSubMch;
+      const legacyModeName = useCustomChannel ? '自定义渠道旧流程' : '旧流程（不禁用旧子商户号）';
+      setStatus(resetStatus, useLegacyFlow ? `正在处理${businessLineName(businessLine)}${legacyModeName}` : `正在调用${businessLineName(businessLine)}批量重置接口`);
+      log(`开始${businessLineName(businessLine)}${useLegacyFlow ? legacyModeName : '批量接口重置'}: ${merchantIds.join('；')}`);
+      const results = useLegacyFlow
         ? await runCustomChannelReset(merchantIds, type, options, log, renderResults, businessLine)
         : await runBatchReset(merchantIds, type, options, log, reportMode);
       resetRunning = false;

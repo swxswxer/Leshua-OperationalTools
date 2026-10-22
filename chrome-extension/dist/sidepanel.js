@@ -4159,6 +4159,7 @@ ${row.node}`]) {
         <section id="syt-view-reset" class="view active">
           <fieldset class="segmented business-line"><legend class="sr-only">\u91CD\u7F6E\u4E1A\u52A1\u7EBF</legend><label><input type="radio" name="syt-business-line" value="syt" checked>\u6536\u94F6\u901A</label><label><input type="radio" name="syt-business-line" value="lhsd">\u8054\u5408\u6536\u5355</label></fieldset>
           <label for="syt-merchant-ids">\u4E50\u5237\u5546\u6237\u53F7</label><div class="input-clear"><input id="syt-merchant-ids" placeholder="\u591A\u4E2A\u5546\u6237\u53F7\u7528\u5206\u53F7\u3001\u9017\u53F7\u3001\u7A7A\u683C\u6216\u6362\u884C\u5206\u9694" autocomplete="off" aria-describedby="syt-merchant-hint"><button id="syt-clear-merchant" type="button" class="icon-button" title="\u6E05\u7A7A\u5546\u6237\u53F7" aria-label="\u6E05\u7A7A\u5546\u6237\u53F7">${icon("close")}</button></div><div id="syt-merchant-hint" class="field-hint" aria-live="polite">\u91CD\u7F6E\u6700\u591A 5 \u4E2A \xB7 \u914D\u7F6E key \u4E0D\u9650\u6570\u91CF</div>
+          <label class="legacy-reset-toggle"><input id="syt-disable-old-submch" type="checkbox" checked><span>\u662F\u5426\u7981\u7528\u65E7\u5B50\u5546\u6237\u53F7</span></label><div class="field-hint">\u53D6\u6D88\u52FE\u9009\u540E\u5F3A\u5236\u8D70\u65E7\u6D41\u7A0B\uFF0C\u4E14\u4E0D\u4F1A\u81EA\u52A8\u7981\u7528\u65E7\u5B50\u5546\u6237\u53F7\u3002</div>
           <fieldset class="segmented report-channels"><legend class="sr-only">\u91CD\u7F6E\u901A\u9053</legend><label><input type="radio" name="syt-report-type" value="WECHAT">\u5FAE\u4FE1</label><label><input type="radio" name="syt-report-type" value="ALIPAY">\u652F\u4ED8\u5B9D</label><label><input type="radio" name="syt-report-type" value="ALL" checked>\u5168\u90E8</label></fieldset>
           <details id="syt-optional-config" class="optional-config"><summary>${icon("chevron")}<span>\u53EF\u9009\u914D\u7F6E</span><span id="syt-optional-summary">\u6E20\u9053 \xB7 appid \xB7 \u6388\u6743\u76EE\u5F55</span></summary><div class="optional-content"><label>\u4E0A\u62A5\u9884\u8BBE<select id="syt-preset">${PRESETS.map((preset2, index) => `<option value="${index}">${preset2.name}</option>`).join("")}</select></label>
           <div id="syt-channel-options" class="optional-options"><div class="section-title">\u53EF\u9009\u4E0A\u62A5\u6E20\u9053</div><div class="form-row"><label>\u5FAE\u4FE1\u6E20\u9053\u53F7<input id="syt-wx-channel-id" autocomplete="off"></label><label>\u5FAE\u4FE1\u6E20\u9053\u4E3B\u4F53<input id="syt-wx-channel-name" autocomplete="off"></label></div><div class="form-row"><label>\u652F\u4ED8\u5B9D\u6E20\u9053\u53F7<input id="syt-alipay-channel-id" autocomplete="off"></label><label>\u652F\u4ED8\u5B9D\u6E20\u9053\u4E3B\u4F53<input id="syt-alipay-channel-name" autocomplete="off"></label></div></div>
@@ -4205,6 +4206,7 @@ ${row.node}`]) {
     toolSelect.add(new Option("\u91CD\u51FA\u6253\u6B3E\u5355", "repay"));
     const clearMerchant = byId(root, "syt-clear-merchant");
     const merchantHint = byId(root, "syt-merchant-hint");
+    const disableOldSubMch = byId(root, "syt-disable-old-submch");
     const optionalConfig = byId(root, "syt-optional-config");
     const preset = byId(root, "syt-preset");
     const channelOptions = byId(root, "syt-channel-options");
@@ -4261,7 +4263,7 @@ ${row.node}`]) {
       sourceName: alipayChannelName.value.trim(),
       subAppids: appids.value.trim(),
       jsapiPaths: jsapiPaths.value.trim(),
-      disableOldSubMch: true
+      disableOldSubMch: disableOldSubMch.checked
     });
     const selectedBusinessLine = () => businessLineInputs.find((input) => input.checked)?.value === "lhsd" ? "lhsd" : "syt";
     const renderResults = (results) => {
@@ -4366,9 +4368,11 @@ ${row.node}`]) {
         resetRunning = true;
         renderResults([]);
         const useCustomChannel = hasCustomChannel(options);
-        setStatus(resetStatus, useCustomChannel ? `\u6B63\u5728\u5904\u7406${businessLineName(businessLine)}\u81EA\u5B9A\u4E49\u6E20\u9053\u91CD\u7F6E` : `\u6B63\u5728\u8C03\u7528${businessLineName(businessLine)}\u6279\u91CF\u91CD\u7F6E\u63A5\u53E3`);
-        log(`\u5F00\u59CB${businessLineName(businessLine)}${useCustomChannel ? "\u81EA\u5B9A\u4E49\u6E20\u9053" : "\u6279\u91CF"}\u91CD\u7F6E: ${merchantIds.join("\uFF1B")}`);
-        const results = useCustomChannel ? await runCustomChannelReset(merchantIds, type, options, log, renderResults, businessLine) : await runBatchReset(merchantIds, type, options, log, reportMode);
+        const useLegacyFlow = useCustomChannel || !options.disableOldSubMch;
+        const legacyModeName = useCustomChannel ? "\u81EA\u5B9A\u4E49\u6E20\u9053\u65E7\u6D41\u7A0B" : "\u65E7\u6D41\u7A0B\uFF08\u4E0D\u7981\u7528\u65E7\u5B50\u5546\u6237\u53F7\uFF09";
+        setStatus(resetStatus, useLegacyFlow ? `\u6B63\u5728\u5904\u7406${businessLineName(businessLine)}${legacyModeName}` : `\u6B63\u5728\u8C03\u7528${businessLineName(businessLine)}\u6279\u91CF\u91CD\u7F6E\u63A5\u53E3`);
+        log(`\u5F00\u59CB${businessLineName(businessLine)}${useLegacyFlow ? legacyModeName : "\u6279\u91CF\u63A5\u53E3\u91CD\u7F6E"}: ${merchantIds.join("\uFF1B")}`);
+        const results = useLegacyFlow ? await runCustomChannelReset(merchantIds, type, options, log, renderResults, businessLine) : await runBatchReset(merchantIds, type, options, log, reportMode);
         resetRunning = false;
         renderResults(results);
         await copyCurrentResults(true);

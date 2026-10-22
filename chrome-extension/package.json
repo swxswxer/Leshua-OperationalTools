@@ -1,7 +1,7 @@
 {
   "name": "syt-operations-extension",
   "private": true,
-  "version": "1.0.20",
+  "version": "1.0.21",
   "scripts": {
     "build": "node build.mjs",
     "package:edge": "node package-edge.mjs",
