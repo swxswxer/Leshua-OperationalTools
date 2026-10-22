@@ -289,6 +289,7 @@ function createPanel(): void {
       setStatus(resetStatus, message, true);
       log(`重置失败: ${message}`, true);
     } finally {
+      disableOldSubMch.checked = true;
       if (resetRunning) { resetRunning = false; renderResults(latestResults); }
       setBusy(false);
     }

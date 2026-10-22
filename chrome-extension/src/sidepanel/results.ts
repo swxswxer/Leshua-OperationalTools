@@ -1,12 +1,20 @@
-import type { MerchantReportResult } from '../api/quick-report';
+import type { ChannelResult, MerchantReportResult } from '../api/quick-report';
 import { channelText, copyText } from './helpers';
 import { setButtonLabel } from './icons';
+
+function copyChannelText(channel: ChannelResult, name: 'wechat' | 'alipay'): string {
+  if (name === 'alipay' && channel.state === 'failure'
+    && /MERCHANT_MCC_LIMIT|商户经营类目与申请产品不符/i.test(channel.error || '')) {
+    return '失败：上报失败；请修改商户行业类型（MCC）后重新上报';
+  }
+  return channelText(channel);
+}
 
 export function copyResultText(results: MerchantReportResult[]): string {
   return results.map((result) => {
     const channels = [
-      result.wechat.state !== 'skipped' ? `微信子商户号:${channelText(result.wechat)}` : '',
-      result.alipay.state !== 'skipped' ? `支付宝子商户号:${channelText(result.alipay)}` : '',
+      result.wechat.state !== 'skipped' ? `微信子商户号:${copyChannelText(result.wechat, 'wechat')}` : '',
+      result.alipay.state !== 'skipped' ? `支付宝子商户号:${copyChannelText(result.alipay, 'alipay')}` : '',
     ].filter(Boolean);
     return [`乐刷商户号${result.merchantId}`, channels.join(' ')].join('\n');
   }).join('\n');

@@ -383,11 +383,17 @@
   }
 
   // src/sidepanel/results.ts
+  function copyChannelText(channel, name) {
+    if (name === "alipay" && channel.state === "failure" && /MERCHANT_MCC_LIMIT|商户经营类目与申请产品不符/i.test(channel.error || "")) {
+      return "\u5931\u8D25\uFF1A\u4E0A\u62A5\u5931\u8D25\uFF1B\u8BF7\u4FEE\u6539\u5546\u6237\u884C\u4E1A\u7C7B\u578B\uFF08MCC\uFF09\u540E\u91CD\u65B0\u4E0A\u62A5";
+    }
+    return channelText(channel);
+  }
   function copyResultText(results) {
     return results.map((result) => {
       const channels = [
-        result.wechat.state !== "skipped" ? `\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7:${channelText(result.wechat)}` : "",
-        result.alipay.state !== "skipped" ? `\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7:${channelText(result.alipay)}` : ""
+        result.wechat.state !== "skipped" ? `\u5FAE\u4FE1\u5B50\u5546\u6237\u53F7:${copyChannelText(result.wechat, "wechat")}` : "",
+        result.alipay.state !== "skipped" ? `\u652F\u4ED8\u5B9D\u5B50\u5546\u6237\u53F7:${copyChannelText(result.alipay, "alipay")}` : ""
       ].filter(Boolean);
       return [`\u4E50\u5237\u5546\u6237\u53F7${result.merchantId}`, channels.join(" ")].join("\n");
     }).join("\n");
@@ -4384,6 +4390,7 @@ ${row.node}`]) {
         setStatus(resetStatus, message, true);
         log(`\u91CD\u7F6E\u5931\u8D25: ${message}`, true);
       } finally {
+        disableOldSubMch.checked = true;
         if (resetRunning) {
           resetRunning = false;
           renderResults(latestResults);
