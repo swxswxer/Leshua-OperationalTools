@@ -176,8 +176,9 @@
   }
 
   // src/api/quick-report.ts
+  var QUICK_REPORT_BATCH_SIZE = 5;
   function parseMerchantIds(raw) {
-    return parseMerchantIdList(raw, { maxCount: 5, maxCountMessage: "\u4E00\u6B21\u6700\u591A\u91CD\u7F6E 5 \u4E2A\u4E50\u5237\u5546\u6237\u53F7" });
+    return parseMerchantIdList(raw);
   }
   function isRequested(type, channel) {
     return type === "ALL" || type === "WECHAT" && channel === "wechat" || type === "ALIPAY" && channel === "alipay";
@@ -220,6 +221,9 @@
     });
   }
   async function submitQuickReport(merchantIds, reportType, reportMode = "SYT", fetchImpl) {
+    if (merchantIds.length === 0 || merchantIds.length > QUICK_REPORT_BATCH_SIZE) {
+      throw new Error(`\u6279\u91CF\u91CD\u7F6E\u63A5\u53E3\u5355\u6B21\u5FC5\u987B\u63D0\u4EA4 1\u2013${QUICK_REPORT_BATCH_SIZE} \u4E2A\u4E50\u5237\u5546\u6237\u53F7`);
+    }
     const body = new URLSearchParams({
       merchantIds: merchantIds.join(";"),
       reportType,
@@ -688,15 +692,53 @@
       }
     }
   }
-  async function runBatchReset(merchantIds, reportType, options, log, reportMode = "SYT") {
-    const results = await submitQuickReport(merchantIds, reportType, reportMode);
-    results.forEach((result) => {
-      result.businessLine = reportMode === "COMMON" ? "lhsd" : "syt";
-    });
-    await supplementFailureReasons(results, log);
-    if (isRequested(reportType, "wechat")) {
-      await bindWechatPaymentConfigs(results, options, log);
+  async function runBatchReset(merchantIds, reportType, options, log, reportMode = "SYT", onResultUpdate) {
+    const businessLine = reportMode === "COMMON" ? "lhsd" : "syt";
+    const results = merchantIds.map((merchantId) => ({
+      merchantId,
+      route: "batch",
+      businessLine,
+      wechat: isRequested(reportType, "wechat") ? { state: "pending" } : skippedChannel(),
+      alipay: isRequested(reportType, "alipay") ? { state: "pending" } : skippedChannel()
+    }));
+    const update = () => onResultUpdate?.([...results]);
+    update();
+    const batches = [];
+    const batchCount = Math.ceil(merchantIds.length / QUICK_REPORT_BATCH_SIZE);
+    for (let offset = 0; offset < merchantIds.length; offset += QUICK_REPORT_BATCH_SIZE) {
+      const batchIds = merchantIds.slice(offset, offset + QUICK_REPORT_BATCH_SIZE);
+      const batchNumber = offset / QUICK_REPORT_BATCH_SIZE + 1;
+      const run = async () => {
+        log(`\u6279\u91CF\u91CD\u7F6E\u7B2C ${batchNumber}/${batchCount} \u6279\u5F00\u59CB\uFF0C\u5546\u6237: ${batchIds.join("\uFF1B")}`);
+        let batchResults;
+        try {
+          batchResults = await submitQuickReport(batchIds, reportType, reportMode);
+        } catch (error) {
+          const message = `\u6279\u6B21\u8BF7\u6C42\u5931\u8D25\uFF0C\u7ED3\u679C\u5F85\u786E\u8BA4\uFF1A${error instanceof Error ? error.message : String(error)}`;
+          batchIds.forEach((_, index) => {
+            const result = results[offset + index];
+            if (isRequested(reportType, "wechat")) result.wechat = { state: "failure", error: message };
+            if (isRequested(reportType, "alipay")) result.alipay = { state: "failure", error: message };
+          });
+          update();
+          log(`\u6279\u91CF\u91CD\u7F6E\u7B2C ${batchNumber}/${batchCount} \u6279\uFF1A${message}`, true);
+          return;
+        }
+        batchResults.forEach((result, index) => {
+          result.businessLine = businessLine;
+          results[offset + index] = result;
+        });
+        update();
+        await supplementFailureReasons(batchResults, log);
+        if (isRequested(reportType, "wechat")) {
+          await bindWechatPaymentConfigs(batchResults, options, log);
+        }
+        update();
+        log(`\u6279\u91CF\u91CD\u7F6E\u7B2C ${batchNumber}/${batchCount} \u6279\u5904\u7406\u5B8C\u6210`);
+      };
+      batches.push(run());
     }
+    await Promise.all(batches);
     return results;
   }
 
@@ -882,6 +924,7 @@
   }
 
   // src/tools/custom-channel-reset.ts
+  var LEGACY_BATCH_SIZE = 4;
   function pendingChannel() {
     return { state: "pending" };
   }
@@ -934,22 +977,27 @@
     }
   }
   async function runCustomChannelReset(merchantIds, reportType, options, log, onResultUpdate, businessLine) {
-    const output = [];
-    for (const merchantId of merchantIds) {
-      const result = {
-        merchantId,
-        route: "custom",
-        businessLine,
-        wechat: isRequested(reportType, "wechat") ? pendingChannel() : skippedChannel(),
-        alipay: isRequested(reportType, "alipay") ? pendingChannel() : skippedChannel()
-      };
-      output.push(result);
-      const update = () => onResultUpdate([...output]);
-      update();
-      const tasks = [];
-      if (isRequested(reportType, "wechat")) tasks.push(resetWechat(merchantId, options, result, update, log));
-      if (isRequested(reportType, "alipay")) tasks.push(resetAlipay(merchantId, options, result, update, log));
-      await Promise.all(tasks);
+    const output = merchantIds.map((merchantId) => ({
+      merchantId,
+      route: "custom",
+      businessLine,
+      wechat: isRequested(reportType, "wechat") ? pendingChannel() : skippedChannel(),
+      alipay: isRequested(reportType, "alipay") ? pendingChannel() : skippedChannel()
+    }));
+    const update = () => onResultUpdate([...output]);
+    update();
+    const batchCount = Math.ceil(output.length / LEGACY_BATCH_SIZE);
+    for (let offset = 0; offset < output.length; offset += LEGACY_BATCH_SIZE) {
+      const batch = output.slice(offset, offset + LEGACY_BATCH_SIZE);
+      const batchNumber = offset / LEGACY_BATCH_SIZE + 1;
+      log(`\u65E7\u6D41\u7A0B\u91CD\u7F6E\u7B2C ${batchNumber}/${batchCount} \u6279\u5F00\u59CB\uFF0C\u5546\u6237: ${batch.map((result) => result.merchantId).join("\uFF1B")}`);
+      await Promise.all(batch.map(async (result) => {
+        const tasks = [];
+        if (isRequested(reportType, "wechat")) tasks.push(resetWechat(result.merchantId, options, result, update, log));
+        if (isRequested(reportType, "alipay")) tasks.push(resetAlipay(result.merchantId, options, result, update, log));
+        await Promise.all(tasks);
+      }));
+      log(`\u65E7\u6D41\u7A0B\u91CD\u7F6E\u7B2C ${batchNumber}/${batchCount} \u6279\u5904\u7406\u5B8C\u6210`);
     }
     return output;
   }
@@ -4211,7 +4259,7 @@ ${row.node}`]) {
         <div class="tool-heading"><div><button id="syt-back" class="icon-button" type="button" title="\u8FD4\u56DE\u91CD\u7F6E\u9875\u9762" aria-label="\u8FD4\u56DE\u91CD\u7F6E\u9875\u9762">${icon("back")}</button><h1 id="syt-title">\u5B50\u5546\u6237\u53F7\u91CD\u7F6E</h1></div><select id="syt-tool-select" aria-label="\u5207\u6362\u5DE5\u5177"><option value="" disabled selected>\u5207\u6362\u5DE5\u5177</option><option value="reset">\u5B50\u5546\u6237\u53F7\u91CD\u7F6E</option><option value="code">\u7801\u724C\u5212\u8F6C</option><option value="device">\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8</option><option value="lhsd-device">\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8</option><option value="whitelist">\u9632\u5207\u6237\u767D\u540D\u5355</option><option value="bind-config">\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E</option></select></div>
         <section id="syt-view-reset" class="view active">
           <fieldset class="segmented business-line"><legend class="sr-only">\u91CD\u7F6E\u4E1A\u52A1\u7EBF</legend><label><input type="radio" name="syt-business-line" value="syt" checked>\u6536\u94F6\u901A</label><label><input type="radio" name="syt-business-line" value="lhsd">\u8054\u5408\u6536\u5355</label></fieldset>
-          <label for="syt-merchant-ids">\u4E50\u5237\u5546\u6237\u53F7</label><div class="input-clear"><input id="syt-merchant-ids" placeholder="\u591A\u4E2A\u5546\u6237\u53F7\u7528\u5206\u53F7\u3001\u9017\u53F7\u3001\u7A7A\u683C\u6216\u6362\u884C\u5206\u9694" autocomplete="off" aria-describedby="syt-merchant-hint"><button id="syt-clear-merchant" type="button" class="icon-button" title="\u6E05\u7A7A\u5546\u6237\u53F7" aria-label="\u6E05\u7A7A\u5546\u6237\u53F7">${icon("close")}</button></div><div id="syt-merchant-hint" class="field-hint" aria-live="polite">\u91CD\u7F6E\u6700\u591A 5 \u4E2A \xB7 \u914D\u7F6E key \u4E0D\u9650\u6570\u91CF</div>
+          <label for="syt-merchant-ids">\u4E50\u5237\u5546\u6237\u53F7</label><div class="input-clear"><input id="syt-merchant-ids" placeholder="\u591A\u4E2A\u5546\u6237\u53F7\u7528\u5206\u53F7\u3001\u9017\u53F7\u3001\u7A7A\u683C\u6216\u6362\u884C\u5206\u9694" autocomplete="off" aria-describedby="syt-merchant-hint"><button id="syt-clear-merchant" type="button" class="icon-button" title="\u6E05\u7A7A\u5546\u6237\u53F7" aria-label="\u6E05\u7A7A\u5546\u6237\u53F7">${icon("close")}</button></div><div id="syt-merchant-hint" class="field-hint" aria-live="polite">\u652F\u6301\u6279\u91CF\u8F93\u5165 \xB7 \u91CD\u7F6E\u81EA\u52A8\u5206\u6279\u5904\u7406</div>
           <label class="legacy-reset-toggle"><input id="syt-disable-old-submch" type="checkbox" checked><span>\u662F\u5426\u7981\u7528\u65E7\u5B50\u5546\u6237\u53F7</span></label><div class="field-hint">\u53D6\u6D88\u52FE\u9009\u540E\u5F3A\u5236\u8D70\u65E7\u6D41\u7A0B\uFF0C\u4E14\u4E0D\u4F1A\u81EA\u52A8\u7981\u7528\u65E7\u5B50\u5546\u6237\u53F7\u3002</div>
           <fieldset class="segmented report-channels"><legend class="sr-only">\u91CD\u7F6E\u901A\u9053</legend><label><input type="radio" name="syt-report-type" value="WECHAT">\u5FAE\u4FE1</label><label><input type="radio" name="syt-report-type" value="ALIPAY">\u652F\u4ED8\u5B9D</label><label><input type="radio" name="syt-report-type" value="ALL" checked>\u5168\u90E8</label></fieldset>
           <details id="syt-optional-config" class="optional-config"><summary>${icon("chevron")}<span>\u53EF\u9009\u914D\u7F6E</span><span id="syt-optional-summary">\u6E20\u9053 \xB7 appid \xB7 \u6388\u6743\u76EE\u5F55</span></summary><div class="optional-content"><label>\u4E0A\u62A5\u9884\u8BBE<select id="syt-preset">${PRESETS.map((preset2, index) => `<option value="${index}">${preset2.name}</option>`).join("")}</select></label>
@@ -4369,7 +4417,7 @@ ${row.node}`]) {
     };
     const updateMerchantHint = () => {
       const ids = resetInput.value.split(/[;；,，\s]+/).map((value) => value.trim()).filter(Boolean);
-      let message = ids.length ? `\u5DF2\u8BC6\u522B ${ids.length} \u4E2A\u5546\u6237 \xB7 \u91CD\u7F6E\u6700\u591A 5 \u4E2A` : "\u91CD\u7F6E\u6700\u591A 5 \u4E2A \xB7 \u914D\u7F6E key \u4E0D\u9650\u6570\u91CF";
+      let message = ids.length ? `\u5DF2\u8BC6\u522B ${ids.length} \u4E2A\u5546\u6237 \xB7 \u91CD\u7F6E\u81EA\u52A8\u5206\u6279\u5904\u7406` : "\u652F\u6301\u6279\u91CF\u8F93\u5165 \xB7 \u91CD\u7F6E\u81EA\u52A8\u5206\u6279\u5904\u7406";
       let invalid = false;
       if (ids.some((id) => !/^\d{10}$/.test(id))) {
         message = "\u5546\u6237\u53F7\u9700\u4E3A 10 \u4F4D\u6570\u5B57\uFF1B\u53EF\u7528\u5206\u53F7\u3001\u9017\u53F7\u3001\u7A7A\u683C\u6216\u6362\u884C\u5206\u9694";
@@ -4377,7 +4425,7 @@ ${row.node}`]) {
       } else if (new Set(ids).size !== ids.length) {
         message = "\u5B58\u5728\u91CD\u590D\u5546\u6237\u53F7\uFF0C\u8BF7\u68C0\u67E5";
         invalid = true;
-      } else if (ids.length > 5) message = `\u5DF2\u8BC6\u522B ${ids.length} \u4E2A\u5546\u6237 \xB7 \u4EC5\u914D\u7F6E key \u652F\u6301\u8D85\u8FC7 5 \u4E2A`;
+      }
       merchantHint.textContent = message;
       merchantHint.classList.toggle("error", invalid);
       resetInput.setAttribute("aria-invalid", String(invalid));
@@ -4427,7 +4475,7 @@ ${row.node}`]) {
         const legacyModeName = useCustomChannel ? "\u81EA\u5B9A\u4E49\u6E20\u9053\u65E7\u6D41\u7A0B" : "\u65E7\u6D41\u7A0B\uFF08\u4E0D\u7981\u7528\u65E7\u5B50\u5546\u6237\u53F7\uFF09";
         setStatus(resetStatus, useLegacyFlow ? `\u6B63\u5728\u5904\u7406${businessLineName(businessLine)}${legacyModeName}` : `\u6B63\u5728\u8C03\u7528${businessLineName(businessLine)}\u6279\u91CF\u91CD\u7F6E\u63A5\u53E3`);
         log(`\u5F00\u59CB${businessLineName(businessLine)}${useLegacyFlow ? legacyModeName : "\u6279\u91CF\u63A5\u53E3\u91CD\u7F6E"}: ${merchantIds.join("\uFF1B")}`);
-        const results = useLegacyFlow ? await runCustomChannelReset(merchantIds, type, options, log, renderResults, businessLine) : await runBatchReset(merchantIds, type, options, log, reportMode);
+        const results = useLegacyFlow ? await runCustomChannelReset(merchantIds, type, options, log, renderResults, businessLine) : await runBatchReset(merchantIds, type, options, log, reportMode, renderResults);
         resetRunning = false;
         renderResults(results);
         await copyCurrentResults(true);

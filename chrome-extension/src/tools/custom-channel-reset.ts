@@ -8,6 +8,7 @@ import {
 import { isRequested, skippedChannel, type MerchantReportResult, type ReportType } from '../api/quick-report';
 
 type ResultUpdateHandler = (results: MerchantReportResult[]) => void;
+const LEGACY_BATCH_SIZE = 4;
 
 function pendingChannel() {
   return { state: 'pending' as const };
@@ -71,20 +72,25 @@ export async function runCustomChannelReset(
   merchantIds: string[], reportType: ReportType, options: ReportOptions,
   log: LogHandler, onResultUpdate: ResultUpdateHandler, businessLine: 'syt' | 'lhsd',
 ): Promise<MerchantReportResult[]> {
-  const output: MerchantReportResult[] = [];
-  for (const merchantId of merchantIds) {
-    const result: MerchantReportResult = {
-      merchantId, route: 'custom', businessLine,
-      wechat: isRequested(reportType, 'wechat') ? pendingChannel() : skippedChannel(),
-      alipay: isRequested(reportType, 'alipay') ? pendingChannel() : skippedChannel(),
-    };
-    output.push(result);
-    const update = () => onResultUpdate([...output]);
-    update();
-    const tasks: Promise<void>[] = [];
-    if (isRequested(reportType, 'wechat')) tasks.push(resetWechat(merchantId, options, result, update, log));
-    if (isRequested(reportType, 'alipay')) tasks.push(resetAlipay(merchantId, options, result, update, log));
-    await Promise.all(tasks);
+  const output: MerchantReportResult[] = merchantIds.map((merchantId) => ({
+    merchantId, route: 'custom', businessLine,
+    wechat: isRequested(reportType, 'wechat') ? pendingChannel() : skippedChannel(),
+    alipay: isRequested(reportType, 'alipay') ? pendingChannel() : skippedChannel(),
+  }));
+  const update = () => onResultUpdate([...output]);
+  update();
+  const batchCount = Math.ceil(output.length / LEGACY_BATCH_SIZE);
+  for (let offset = 0; offset < output.length; offset += LEGACY_BATCH_SIZE) {
+    const batch = output.slice(offset, offset + LEGACY_BATCH_SIZE);
+    const batchNumber = offset / LEGACY_BATCH_SIZE + 1;
+    log(`旧流程重置第 ${batchNumber}/${batchCount} 批开始，商户: ${batch.map(result => result.merchantId).join('；')}`);
+    await Promise.all(batch.map(async (result) => {
+      const tasks: Promise<void>[] = [];
+      if (isRequested(reportType, 'wechat')) tasks.push(resetWechat(result.merchantId, options, result, update, log));
+      if (isRequested(reportType, 'alipay')) tasks.push(resetAlipay(result.merchantId, options, result, update, log));
+      await Promise.all(tasks);
+    }));
+    log(`旧流程重置第 ${batchNumber}/${batchCount} 批处理完成`);
   }
   return output;
 }

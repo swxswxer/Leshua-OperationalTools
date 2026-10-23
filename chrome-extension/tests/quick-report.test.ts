@@ -1,15 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { parseMerchantIds, parseQuickReportResponse } from '../src/api/quick-report';
+import { parseMerchantIds, parseQuickReportResponse, submitQuickReport } from '../src/api/quick-report';
 
 describe('parseMerchantIds', () => {
   it('keeps the semicolon input order and removes empty entries', () => {
     expect(parseMerchantIds('1234567890;;2345678901;')).toEqual(['1234567890', '2345678901']);
   });
 
-  it('rejects duplicates, invalid IDs and batches over five', () => {
+  it('rejects duplicates and invalid IDs', () => {
     expect(() => parseMerchantIds('1234567890;1234567890')).toThrow('重复');
     expect(() => parseMerchantIds('123')).toThrow('10 位');
-    expect(() => parseMerchantIds('1234567890;2234567890;3234567890;4234567890;5234567890;6234567890')).toThrow('最多');
+  });
+
+  it('accepts more than five merchants with mixed separators and preserves leading zeros', () => {
+    expect(parseMerchantIds('0034567890；2234567890,3234567890，4234567890 5234567890\n6234567890'))
+      .toEqual(['0034567890', '2234567890', '3234567890', '4234567890', '5234567890', '6234567890']);
+  });
+
+  it('still rejects a single backend request containing more than five merchants', async () => {
+    const ids = Array.from({ length: 6 }, (_, index) => String(1000000000 + index));
+    await expect(submitQuickReport(ids, 'ALL')).rejects.toThrow('5');
   });
 });
 

@@ -4,6 +4,7 @@ import { parseMerchantIdList } from './merchant-id';
 export type ReportType = 'WECHAT' | 'ALIPAY' | 'ALL';
 export type ChannelName = 'wechat' | 'alipay';
 export type ReportMode = 'SYT' | 'COMMON';
+export const QUICK_REPORT_BATCH_SIZE = 5;
 
 export interface ChannelResult {
   state: 'pending' | 'success' | 'failure' | 'skipped';
@@ -48,7 +49,7 @@ interface QuickReportResponse {
 }
 
 export function parseMerchantIds(raw: string): string[] {
-  return parseMerchantIdList(raw, { maxCount: 5, maxCountMessage: '一次最多重置 5 个乐刷商户号' });
+  return parseMerchantIdList(raw);
 }
 
 export function isRequested(type: ReportType, channel: ChannelName): boolean {
@@ -118,6 +119,9 @@ export async function submitQuickReport(
   reportMode: ReportMode = 'SYT',
   fetchImpl?: typeof fetch,
 ): Promise<MerchantReportResult[]> {
+  if (merchantIds.length === 0 || merchantIds.length > QUICK_REPORT_BATCH_SIZE) {
+    throw new Error(`批量重置接口单次必须提交 1–${QUICK_REPORT_BATCH_SIZE} 个乐刷商户号`);
+  }
   const body = new URLSearchParams({
     merchantIds: merchantIds.join(';'),
     reportType,
