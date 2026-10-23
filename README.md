@@ -39,6 +39,7 @@ Edge 商店上传包使用 `npm run package:edge` 生成 `leshua-operations-edge
 - 微信支付参数绑定：可对新号或商户最新微信映射记录绑定 appid、支付授权目录。
 - 共用商户号输入：重置、配置绑定、配置商户 key、商户注销均支持英文/中文分号、英文/中文逗号、空格和换行分隔，忽略连续分隔符形成的空项，并拒绝重复或格式错误的号码；重置最多 5 个，配置绑定仅支持 1 个，配置 key 不限数量且最多同时处理 5 个请求。
 - 商户注销：连续两次确认后按输入顺序逐个 POST `merchantInfoManager.do?method=merchantLogOff`，表单参数为 `merchantId` 和 `reason=1`。单个请求失败后继续处理其余商户，并逐项显示结果。超时或后台响应不明确时标记为待确认，需先核实状态，避免重复注销请求。
+- 关闭广告：复用主商户号输入框，提交前确认商户清单；按商户逐个 POST `syt_oms/merchantPaidAd/batchAdd`，JSON 参数为单个 `merchantIds`。成功或失败逐项显示；后台返回失败条数时提示到下载中心查看失败文件，超时标记待确认且不自动重试。
 - 码牌划转、防切户白名单、收银通机具划拨、联合收单机具划拨：分别作为独立工具页面。联合收单机具划拨只需填写 SN、旧代理商编号和新代理商编号。
 - 设备换绑配置：独立页面输入乐刷 SN、单日/单月最大绑定次数（留空默认 3）和结算主体白名单（默认是）。先查询精确匹配的 SN 配置，有记录则修改，无记录则新增；修改保留原累计最大商户数和累计最大绑定次数。查询失败、记录不唯一或存在多页时停止，不自动新增。新增依据 JSON 的 `success: true`，修改依据 HTML 的“操作成功”确认结果；保存请求不自动重试。
 - 插件 1.0.5 新增设备换绑配置，接口与业务分别位于 `src/api/device-bind-config.ts` 和 `src/tools/device-bind-config.ts`。
@@ -73,6 +74,7 @@ chrome-extension/src/
 │   ├── payment-config.ts        # appid/支付授权目录绑定接口
 │   ├── merchant-key.ts          # 商户 key 接口
 │   ├── merchant-logoff.ts       # 商户注销接口
+│   ├── merchant-paid-ad.ts      # 付费广告黑名单接口
 │   ├── code-plate.ts            # 码牌模板、上传及消息查询接口
 │   ├── whitelist.ts             # 防切户白名单接口
 │   ├── device-transfer.ts       # 机具代理查询及划拨接口
@@ -82,6 +84,7 @@ chrome-extension/src/
 │   ├── custom-channel-reset.ts  # 自定义渠道重置流程
 │   ├── payment-config.ts        # 单独绑定微信支付参数流程
 │   ├── merchant-key.ts          # 配置商户 key 流程
+│   ├── merchant-paid-ad.ts      # 关闭付费广告流程
 │   ├── code-plate-transfer.ts   # 码牌划转流程
 │   ├── change-whitelist.ts      # 防切户白名单流程
 │   ├── device-transfer.ts       # 机具划拨流程
