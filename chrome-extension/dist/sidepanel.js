@@ -494,6 +494,81 @@
     });
   }
 
+  // src/selection-reset.ts
+  var TAKE_SELECTION_RESET = "operations:take-selection-reset";
+  function selectionResetStorageKey(windowId) {
+    return `operations:selection-reset:${windowId}`;
+  }
+
+  // src/sidepanel/selection-reset.ts
+  function createSelectionResetHandler(actions) {
+    let processing = false;
+    return async (command) => {
+      if (processing || actions.isBusy()) {
+        actions.onError("\u5F53\u524D\u6709\u4EFB\u52A1\u6B63\u5728\u5904\u7406\uFF0C\u672C\u6B21\u53F3\u952E\u91CD\u7F6E\u672A\u6267\u884C\uFF0C\u8BF7\u5B8C\u6210\u540E\u91CD\u8BD5");
+        return;
+      }
+      processing = true;
+      try {
+        if (!await actions.showResetView()) return;
+        if (actions.isBusy()) {
+          actions.onError("\u5F53\u524D\u6709\u4EFB\u52A1\u6B63\u5728\u5904\u7406\uFF0C\u672C\u6B21\u53F3\u952E\u91CD\u7F6E\u672A\u6267\u884C\uFF0C\u8BF7\u5B8C\u6210\u540E\u91CD\u8BD5");
+          return;
+        }
+        actions.applyCommand(command);
+        await actions.runReset();
+      } finally {
+        processing = false;
+      }
+    };
+  }
+  function initializeSelectionResetReceiver(onCommand, onError) {
+    let windowId;
+    let stopped = false;
+    let consuming = false;
+    let consumeAgain = false;
+    const consume = async () => {
+      if (stopped || windowId == null) return;
+      if (consuming) {
+        consumeAgain = true;
+        return;
+      }
+      consuming = true;
+      try {
+        do {
+          consumeAgain = false;
+          const response = await chrome.runtime.sendMessage({ type: TAKE_SELECTION_RESET, windowId });
+          if (!response) throw new Error("\u6269\u5C55\u540E\u53F0\u6CA1\u6709\u8FD4\u56DE\u53F3\u952E\u91CD\u7F6E\u8BF7\u6C42");
+          if (!response.ok) throw new Error(response.error);
+          if (response.command && !stopped) {
+            consumeAgain = true;
+            void onCommand(response.command).catch((error) => onError(error instanceof Error ? error.message : String(error)));
+          }
+        } while (consumeAgain && !stopped);
+      } catch (error) {
+        onError(`\u53F3\u952E\u91CD\u7F6E\u63A5\u6536\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        consuming = false;
+      }
+    };
+    const onChanged = (changes, area) => {
+      if (area === "session" && windowId != null && changes[selectionResetStorageKey(windowId)]?.newValue) {
+        void consume();
+      }
+    };
+    void chrome.windows.getCurrent().then((current) => {
+      if (stopped) return;
+      if (current.id == null) throw new Error("\u65E0\u6CD5\u786E\u5B9A\u4FA7\u8FB9\u680F\u6240\u5C5E\u6D4F\u89C8\u5668\u7A97\u53E3");
+      windowId = current.id;
+      chrome.storage.onChanged.addListener(onChanged);
+      return consume();
+    }).catch((error) => onError(`\u53F3\u952E\u91CD\u7F6E\u521D\u59CB\u5316\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`));
+    return () => {
+      stopped = true;
+      chrome.storage.onChanged.removeListener(onChanged);
+    };
+  }
+
   // src/api/payment-config.ts
   function createdAt(value) {
     return new Date(String(value || "").replace(/\.0$/, "").replace(" ", "T")).getTime() || 0;
@@ -4395,12 +4470,13 @@ ${row.node}`]) {
     const showView = async (name) => {
       if (!await ticketReview.leave()) {
         toolSelect.value = "";
-        return;
+        return false;
       }
       root.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === `syt-view-${name}`));
       backButton.classList.toggle("visible", name !== "reset");
       title.textContent = name === "reset" ? "\u5B50\u5546\u6237\u53F7\u91CD\u7F6E" : { repay: "\u91CD\u51FA\u6253\u6B3E\u5355", "risk-tickets": "\u98CE\u9669\u5546\u6237\u5DE5\u5355\u67E5\u8BE2", "ticket-review": "\u5DE5\u5355\u5BA1\u6838", "sn-authorization": "SN \u6388\u6743\u7801\u4E0B\u53D1", cups: "CUPS \u4E0A\u62A5", code: "\u7801\u724C\u5212\u8F6C", device: "\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8", "lhsd-device": "\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8", "bind-config": "\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name];
       toolSelect.value = "";
+      return true;
     };
     const updateOptionalSummary = () => {
       const configured = Object.values(reportOptions()).some((value) => typeof value === "string" && value.trim());
@@ -4455,7 +4531,7 @@ ${row.node}`]) {
     copyButton.addEventListener("click", async () => {
       await copyCurrentResults();
     });
-    runReset.addEventListener("click", async () => {
+    const executeReset = async () => {
       if (busy) return;
       try {
         const merchantIds = parseMerchantIds(resetInput.value);
@@ -4494,6 +4570,30 @@ ${row.node}`]) {
         }
         setBusy(false);
       }
+    };
+    runReset.addEventListener("click", () => {
+      void executeReset();
+    });
+    const onSelectionResetError = (message) => {
+      log(message, true);
+      if (!busy) setStatus(resetStatus, message, true);
+    };
+    const handleSelectionReset = createSelectionResetHandler({
+      isBusy: () => busy,
+      showResetView: () => showView("reset"),
+      applyCommand: (command) => {
+        resetInput.value = command.selectionText.trim().replace(/\s+/g, " ");
+        businessLineInputs.forEach((input) => {
+          input.checked = input.value === command.businessLine;
+        });
+        root.querySelectorAll('input[name="syt-report-type"]').forEach((input) => {
+          input.checked = input.value === command.reportType;
+        });
+        updateMerchantHint();
+        log(`\u5DF2\u63A5\u6536\u53F3\u952E\u83DC\u5355\u64CD\u4F5C\uFF1A${businessLineName(command.businessLine)} \xB7 ${command.reportType === "ALL" ? "\u5168\u90E8" : command.reportType === "WECHAT" ? "\u5FAE\u4FE1" : "\u652F\u4ED8\u5B9D"}\u91CD\u7F6E`);
+      },
+      runReset: executeReset,
+      onError: onSelectionResetError
     });
     runPaymentConfig.addEventListener("click", async () => {
       if (busy) return;
@@ -4932,6 +5032,8 @@ ${merchantList}
     });
     initializeSnAuthorization(root, log);
     applyPreset();
+    const stopSelectionResetReceiver = initializeSelectionResetReceiver(handleSelectionReset, onSelectionResetError);
+    window.addEventListener("pagehide", stopSelectionResetReceiver, { once: true });
   }
   createPanel();
 })();

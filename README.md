@@ -22,6 +22,9 @@ Edge 商店上传包使用 `npm run package:edge` 生成 `leshua-operations-edge
 
 ## 功能
 
+- 网页右键重置（1.0.25）：在任意网页选中一个或多个 10 位乐刷商户号，右键进入“乐刷运营工具”，选择收银通/联合收单的微信、支付宝或全部重置，共六项。自动打开当前浏览器窗口的侧边栏，填入商户号、业务线和通道并执行，结果展示和自动复制沿用原重置流程。选中文字沿用主输入框的分隔、格式和重复校验；渠道、微信支付参数和是否禁用旧号沿用当前侧边栏配置，新打开的侧边栏采用默认值。有任务执行中时本次菜单操作会提示未执行，不改写当前任务。需已登录运营后台。
+- 右键菜单需要 `contextMenus` 权限；`storage` 仅用于会话内暂存尚未交付的菜单操作，按浏览器窗口隔离，领取后删除，超过 60 秒的未领取请求丢弃，不会在重开侧边栏时重复执行。菜单适用于浏览器提供文字选中右键菜单的页面，页面自行拦截右键时仍受页面行为影响。Chrome/Edge 从右键菜单打开侧边栏的官方用法见 [Edge 侧边栏说明](https://learn.microsoft.com/en-us/microsoft-edge/extensions/developer-guide/sidebar#opening-the-sidebar-upon-user-interaction)。
+
 - 商户 key 查询（1.0.12）：配置请求无论成功或失败，均继续 POST 查询 `merchant-key-info.do?method=getMerchantKeyInfo&merchantId=...`。依据 `respCode=0` 和非空字符串 `data` 读取 key；界面逐商户展示配置状态、查询异常及只读 key 输入框（点击选中）。key 不写入运行日志、不持久化、不自动复制，开始新操作时旧显示被替换；批量部分失败也保留所有结果。
 
 - SN 授权码下发（1.0.11）：独立页面提供“提交代理商信息”和“发送授权码”，共用代理编号。提交信息填写代理编号、手机号、发送人（接口 `receiver`，后台称接收人）、邮箱；固定 `status=1`、`applicantReason=1`。发送只需代理编号和一个乐刷 SN，先查询该代理唯一的已生效记录，再基于官方模板生成 Excel（SN 类型固定为 0，即乐刷 SN），以 `uploadFile`、记录 `id`、`reason=4` 提交。成功后展示实际记录中的邮箱，不使用输入框中未经保存的邮箱。无有效记录、多个有效记录、多页结果或邮箱不完整时不发送；查询异常也不会当作无记录自动新增。提交期间禁止重复点击，不自动重试，未知状态应先核实后台和邮箱。新增实现分别位于 `api/sn-authorization.ts`、`tools/sn-authorization.ts`、`sidepanel/sn-authorization.ts`；模板打包于 `assets/sn_authorization_template.xlsx`，不依赖远程模板或 Cookie 常量。
@@ -63,7 +66,8 @@ Edge 商店上传包使用 `npm run package:edge` 生成 `leshua-operations-edge
 ```text
 chrome-extension/src/
 ├── background/
-│   └── index.ts                 # 图标打开侧边栏、运营后台请求代理
+│   ├── index.ts                 # 图标打开侧边栏、运营后台请求代理
+│   └── selection-reset.ts       # 六项右键菜单、按窗口暂存和交付重置请求
 ├── api/
 │   ├── http.ts                  # 通用请求、日期和 HTML 解析
 │   ├── quick-report.ts          # 收银通/联合收单共用批量重置接口
@@ -95,9 +99,11 @@ chrome-extension/src/
 │   ├── results.ts               # 商户结果列表、状态摘要与复制
 │   ├── icons.ts                 # 本地打包的 Lucide 图标
 │   ├── display.ts               # 显示大小与本地偏好
+│   ├── selection-reset.ts       # 接收右键请求、任务忙碌检查与执行衔接
 │   └── helpers.ts               # 纯界面辅助函数
 ├── styles/sidepanel.css
-└── types.ts                     # 跨层共享类型
+├── types.ts                     # 跨层共享类型
+└── selection-reset.ts           # 右键重置命令、消息和会话存储键
 ```
 
 收银通与联合收单的默认重置共用 `quick-report.ts`，只通过 `reportMode=SYT/COMMON` 区分。两条业务线的自定义渠道请求共用 `report.ts`，微信支付参数绑定也始终共用 `payment-config.ts`，不再复制两套实现。

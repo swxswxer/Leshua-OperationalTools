@@ -5,6 +5,7 @@ import type {
   BackendResponseMessage,
   BackendTextRequest,
 } from '../types';
+import { initializeSelectionResetMenu } from './selection-reset';
 
 const OPERATIONS_ORIGIN = 'https://om.leshuazf.com';
 
@@ -73,7 +74,9 @@ function handleRequest(request: BackendRequest): Promise<BackendResponseMessage>
   return request.kind === 'multipart' ? handleMultipartRequest(request) : handleTextRequest(request);
 }
 
-chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+const handleSelectionResetMessage = initializeSelectionResetMenu();
+chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+  if (handleSelectionResetMessage(message, sender, sendResponse)) return true;
   const requestMessage = message as Partial<BackendRequestMessage>;
   if (requestMessage.type !== 'operations:backend-request' || !requestMessage.request) return false;
   void handleRequest(requestMessage.request)

@@ -11,7 +11,11 @@ beforeEach(async () => {
   setPanelBehavior = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal('chrome', {
     sidePanel: { setPanelBehavior },
-    runtime: { onMessage: { addListener: (handler: Listener) => { listener = handler; } } },
+    runtime: {
+      onMessage: { addListener: (handler: Listener) => { listener = handler; } },
+      onInstalled: { addListener: vi.fn() },
+    },
+    contextMenus: { onClicked: { addListener: vi.fn() } },
   });
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"success":true}')));
   await import('../src/background/index');
@@ -31,6 +35,8 @@ describe('原生侧边栏', () => {
   it('使用独立侧边栏入口，不注入网页，不使用 popup', () => {
     expect(manifest.side_panel.default_path).toBe('sidepanel.html');
     expect(manifest.permissions).toContain('sidePanel');
+    expect(manifest.permissions).toContain('contextMenus');
+    expect(manifest.permissions).toContain('storage');
     expect(manifest).not.toHaveProperty('content_scripts');
     expect(manifest.action).not.toHaveProperty('default_popup');
     expect(manifest.host_permissions).toEqual(['https://om.leshuazf.com/*']);

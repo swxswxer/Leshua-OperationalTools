@@ -9,6 +9,7 @@ import { copyText, hasCustomChannel, validateChannels } from './helpers';
 import { icon, setButtonLabel } from './icons';
 import { copyResultText, renderResultList } from './results';
 import { initializeDisplaySize } from './display';
+import { createSelectionResetHandler, initializeSelectionResetReceiver } from './selection-reset';
 import { runBatchReset } from '../tools/batch-reset';
 import { runCustomChannelReset } from '../tools/custom-channel-reset';
 import { configureMerchantKeys, parseMerchantKeyIds } from '../tools/merchant-key';
@@ -207,11 +208,12 @@ function createPanel(): void {
   initializeRiskMerchantTickets(root, log);
   initializeRepay(root, log);
   const showView = async (name: string) => {
-    if (!await ticketReview.leave()) { toolSelect.value = ''; return; }
+    if (!await ticketReview.leave()) { toolSelect.value = ''; return false; }
     root.querySelectorAll<HTMLElement>('.view').forEach((view) => view.classList.toggle('active', view.id === `syt-view-${name}`));
     backButton.classList.toggle('visible', name !== 'reset');
     title.textContent = name === 'reset' ? '子商户号重置' : ({ repay: '重出打款单', 'risk-tickets': '风险商户工单查询', 'ticket-review': '工单审核', 'sn-authorization': 'SN 授权码下发', cups: 'CUPS 上报', code: '码牌划转', device: '收银通机具划拨', 'lhsd-device': '联合收单机具划拨', 'bind-config': '设备换绑配置', whitelist: '防切户白名单' } as Record<string, string>)[name];
     toolSelect.value = '';
+    return true;
   };
   const updateOptionalSummary = () => {
     const configured = Object.values(reportOptions()).some((value) => typeof value === 'string' && value.trim());
@@ -257,7 +259,7 @@ function createPanel(): void {
   copyButton.addEventListener('click', async () => {
     await copyCurrentResults();
   });
-  runReset.addEventListener('click', async () => {
+  const executeReset = async () => {
     if (busy) return;
     try {
       const merchantIds = parseMerchantIds(resetInput.value);
@@ -295,6 +297,27 @@ function createPanel(): void {
       if (resetRunning) { resetRunning = false; renderResults(latestResults); }
       setBusy(false);
     }
+  };
+  runReset.addEventListener('click', () => { void executeReset(); });
+
+  const onSelectionResetError = (message: string) => {
+    log(message, true);
+    if (!busy) setStatus(resetStatus, message, true);
+  };
+  const handleSelectionReset = createSelectionResetHandler({
+    isBusy: () => busy,
+    showResetView: () => showView('reset'),
+    applyCommand: (command) => {
+      resetInput.value = command.selectionText.trim().replace(/\s+/g, ' ');
+      businessLineInputs.forEach(input => { input.checked = input.value === command.businessLine; });
+      root.querySelectorAll<HTMLInputElement>('input[name="syt-report-type"]').forEach(input => {
+        input.checked = input.value === command.reportType;
+      });
+      updateMerchantHint();
+      log(`已接收右键菜单操作：${businessLineName(command.businessLine)} · ${command.reportType === 'ALL' ? '全部' : command.reportType === 'WECHAT' ? '微信' : '支付宝'}重置`);
+    },
+    runReset: executeReset,
+    onError: onSelectionResetError,
   });
 
   runPaymentConfig.addEventListener('click', async () => {
@@ -707,6 +730,8 @@ function createPanel(): void {
   });
   initializeSnAuthorization(root, log);
   applyPreset();
+  const stopSelectionResetReceiver = initializeSelectionResetReceiver(handleSelectionReset, onSelectionResetError);
+  window.addEventListener('pagehide', stopSelectionResetReceiver, { once: true });
 }
 
 createPanel();
