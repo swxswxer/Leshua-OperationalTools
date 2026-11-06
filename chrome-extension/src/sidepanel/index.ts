@@ -494,7 +494,11 @@ function createPanel(): void {
   byId<HTMLButtonElement>(root, 'syt-run-code').addEventListener('click', async () => {
     const status = byId<HTMLElement>(root, 'syt-code-status');
     const values: CodePlateValues = { startCode: byId<HTMLInputElement>(root, 'syt-code-start').value.trim(), endCode: byId<HTMLInputElement>(root, 'syt-code-end').value.trim(), sourceAgent: byId<HTMLInputElement>(root, 'syt-code-source').value.trim(), targetAgent: byId<HTMLInputElement>(root, 'syt-code-target').value.trim() };
-    try { setStatus(status, '处理中...'); await transferCodePlates(values, log, (_state, message) => setStatus(status, message)); setStatus(status, '码牌划转完成'); } catch (error) { setStatus(status, error instanceof Error ? error.message : String(error), true); }
+    try {
+      await transferCodePlates(values, log, (_state, message) => setStatus(status, message));
+    } catch (error) {
+      setStatus(status, error instanceof Error ? error.message : String(error), true);
+    }
   });
   const deviceSn = byId<HTMLInputElement>(root, 'syt-device-sn');
   const deviceOldId = byId<HTMLInputElement>(root, 'syt-device-old-id');

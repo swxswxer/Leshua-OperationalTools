@@ -25,8 +25,8 @@ export async function transferCodePlates(
   onStatus('submitting', '正在提交后台');
   log(`开始提交码牌划转: ${values.sourceAgent} -> ${values.targetAgent}`);
   await submitCodePlateTransfer(values, { file });
-  onStatus('waiting', '后台已受理，正在等待处理结果');
-  log('码牌划转任务已受理，开始等待消息中心处理结果');
+  onStatus('waiting', '已提交，正在等待消息中心处理结果');
+  log('码牌划转上传请求已返回，开始查询消息中心');
 
   const outcome = await pollCodePlateTransferResult(values, {
     baselineMessageIds,
@@ -37,8 +37,8 @@ export async function transferCodePlates(
   if (outcome.timeout) {
     const unmatchedMessage = outcome.unmatchedMessages?.[0];
     const message = unmatchedMessage
-      ? `后台已受理并发现新消息，但参数未完全匹配，请到消息中心确认。${summarizeCodePlateMessageValues(unmatchedMessage)}`
-      : '后台已受理，但等待结果超时，请到消息中心确认';
+      ? `发现新消息，但参数与本次提交不匹配，请到消息中心确认。${summarizeCodePlateMessageValues(unmatchedMessage)}`
+      : '已提交，但未收到本次划转结果，请到消息中心确认';
     onStatus('timeout', message);
     log(message);
     return;
