@@ -2,7 +2,7 @@ import { ORIGIN, requestJson } from './http';
 
 export interface DeviceTransferValues {
   sn: string;
-  quantity: '1';
+  quantity: string;
   oldAgentId: string;
   oldAgentName: string;
   oldAgentType: string;
@@ -102,17 +102,23 @@ function toAgent(data: AgentResponseData, id: string): DeviceAgent {
 
 export function validateDeviceTransfer(values: DeviceTransferValues): void {
   if (!trim(values.sn)) throw new Error('请输入乐刷 SN 始');
-  if (values.quantity !== '1') throw new Error('机具划拨数量固定为 1');
+  normalizeDeviceQuantity(values.quantity);
   if (!trim(values.oldAgentId) || !trim(values.newAgentId)) throw new Error('请先查询旧代理商和新代理商信息');
   if (trim(values.oldAgentId) === trim(values.newAgentId)) throw new Error('新旧代理商编号不能相同');
 }
 
-export async function queryOldDeviceAgent(sn: string, fetchImpl?: typeof fetch): Promise<DeviceAgent> {
+export function normalizeDeviceQuantity(quantity: string): string {
+  const value = quantity.trim();
+  if (!/^\d+$/.test(value) || BigInt(value) < 1n) throw new Error('机具划拨数量必须为正整数');
+  return BigInt(value).toString();
+}
+
+export async function queryOldDeviceAgent(sn: string, quantity = '1', fetchImpl?: typeof fetch): Promise<DeviceAgent> {
   const deviceSn = trim(sn);
   if (!deviceSn) throw new Error('请输入乐刷 SN 始');
   const data = await request<AgentResponseData>('changeAgentCheckSn', {
     pinpadUuidStart: deviceSn,
-    pinpadUuidTotal: '1',
+    pinpadUuidTotal: normalizeDeviceQuantity(quantity),
   }, fetchImpl);
   const id = trim(String(data?.oldAgentId || ''));
   if (!id) throw new Error('接口未返回旧代理商编号');
@@ -147,7 +153,7 @@ export async function submitDeviceTransfer(
   validateDeviceTransfer(values);
   const requestValues = {
     pinpadUuidStart: trim(values.sn),
-    pinpadUuidTotal: '1',
+    pinpadUuidTotal: normalizeDeviceQuantity(values.quantity),
     oldAgentId: trim(values.oldAgentId),
     newAgentId: trim(values.newAgentId),
   };

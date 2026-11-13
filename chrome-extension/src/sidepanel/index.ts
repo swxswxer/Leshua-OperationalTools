@@ -30,6 +30,8 @@ import {
   queryOldDeviceAgent,
   submitDeviceTransfer,
   submitLhsdDeviceTransfer,
+  deviceRangeFromQuantity,
+  deviceRangeFromEndSn,
   type DeviceTransferValues,
   type LhsdDeviceTransferValues,
 } from '../tools/device-transfer';
@@ -105,7 +107,7 @@ function createPanel(): void {
           <button id="syt-run-bind-config" class="primary" type="button">确认配置</button><div id="syt-bind-config-status" class="status" role="status"></div>
         </section>
         <section id="syt-view-code" class="view"><div class="form-row"><label>码牌开始编号<input id="syt-code-start" autocomplete="off"></label><label>码牌结束编号<input id="syt-code-end" autocomplete="off"></label></div><div class="form-row"><label>原代理商<input id="syt-code-source" autocomplete="off"></label><label>新代理商<input id="syt-code-target" autocomplete="off"></label></div><button id="syt-run-code" class="primary" type="button">确认划转</button><div id="syt-code-status" class="status"></div></section>
-        <section id="syt-view-device" class="view"><div class="section-title">机具信息</div><div class="form-row"><label>乐刷 SN 始<input id="syt-device-sn" autocomplete="off"></label><label>数量<input id="syt-device-quantity" value="1" readonly></label></div><button id="syt-device-query-old" type="button">查询旧代理商</button><div class="section-title">旧代理商</div><label>旧代理商编号<input id="syt-device-old-id" readonly></label><label>旧代理商名称<input id="syt-device-old-name" readonly></label><label>旧代理商类型<input id="syt-device-old-type" readonly></label><div class="section-title">新代理商</div><label>新代理商编号<input id="syt-device-new-id" autocomplete="off"></label><label>新代理商名称<input id="syt-device-new-name" readonly></label><label>新代理商类型<input id="syt-device-new-type" readonly></label><button id="syt-run-device" class="primary" type="button">确认划拨</button><div id="syt-device-status" class="status"></div></section>
+        <section id="syt-view-device" class="view"><div class="section-title">机具信息</div><div class="form-row"><label>乐刷 SN 始<input id="syt-device-sn" autocomplete="off"></label><label>数量<input id="syt-device-quantity" type="number" min="1" step="1" value="1"></label></div><label>末 SN<input id="syt-device-end-sn" autocomplete="off"></label><button id="syt-device-query-old" type="button">查询旧代理商</button><div class="section-title">旧代理商</div><label>旧代理商编号<input id="syt-device-old-id" readonly></label><label>旧代理商名称<input id="syt-device-old-name" readonly></label><label>旧代理商类型<input id="syt-device-old-type" readonly></label><div class="section-title">新代理商</div><label>新代理商编号<input id="syt-device-new-id" autocomplete="off"></label><label>新代理商名称<input id="syt-device-new-name" readonly></label><label>新代理商类型<input id="syt-device-new-type" readonly></label><button id="syt-run-device" class="primary" type="button">确认划拨</button><div id="syt-device-status" class="status"></div></section>
         <section id="syt-view-lhsd-device" class="view"><label>SN<input id="syt-lhsd-device-sn" autocomplete="off"></label><label>旧代理商编号<input id="syt-lhsd-device-old-id" autocomplete="off"></label><label>新代理商编号<input id="syt-lhsd-device-new-id" autocomplete="off"></label><button id="syt-run-lhsd-device" class="primary" type="button">确认划拨</button><div id="syt-lhsd-device-status" class="status"></div></section>
         <section id="syt-view-whitelist" class="view"><div class="form-row"><label>手机号<input id="syt-white-mobile" autocomplete="off"></label><label>身份证号<input id="syt-white-id" autocomplete="off"></label></div><div class="form-row"><label>营业执照号<input id="syt-white-license" autocomplete="off"></label><label>结算账号<input id="syt-white-account" autocomplete="off"></label></div><button id="syt-white-clear" type="button">清空</button><button id="syt-run-whitelist" class="primary" type="button">添加防切户白名单</button><div id="syt-white-status" class="status"></div></section>
         <section class="log"><div class="log-actions"><button id="syt-log-toggle" class="text-button" type="button" aria-expanded="false" aria-controls="syt-log-full">${icon('chevron')}运行日志</button><button id="syt-log-clear" class="icon-button" type="button" title="清空日志" aria-label="清空日志">${icon('trash')}</button></div><div id="syt-log-preview" aria-live="polite">等待执行</div><div id="syt-log-full"></div></section>
@@ -501,6 +503,8 @@ function createPanel(): void {
     }
   });
   const deviceSn = byId<HTMLInputElement>(root, 'syt-device-sn');
+  const deviceQuantity = byId<HTMLInputElement>(root, 'syt-device-quantity');
+  const deviceEndSn = byId<HTMLInputElement>(root, 'syt-device-end-sn');
   const deviceOldId = byId<HTMLInputElement>(root, 'syt-device-old-id');
   const deviceOldName = byId<HTMLInputElement>(root, 'syt-device-old-name');
   const deviceOldType = byId<HTMLInputElement>(root, 'syt-device-old-type');
@@ -513,9 +517,18 @@ function createPanel(): void {
   let deviceBusy = false;
   let oldAgentLookupKey = '';
   let newAgentLookupKey = '';
+  let deviceRangeMode: 'quantity' | 'endSn' = 'quantity';
+  const readDeviceRange = () => {
+    const range = deviceRangeMode === 'quantity'
+      ? deviceRangeFromQuantity(deviceSn.value, deviceQuantity.value)
+      : deviceRangeFromEndSn(deviceSn.value, deviceEndSn.value);
+    deviceQuantity.value = range.quantity;
+    deviceEndSn.value = range.endSn;
+    return range;
+  };
   const deviceValues = (): DeviceTransferValues => ({
     sn: deviceSn.value.trim(),
-    quantity: '1',
+    quantity: readDeviceRange().quantity,
     oldAgentId: deviceOldId.value.trim(),
     oldAgentName: deviceOldName.value.trim(),
     oldAgentType: deviceOldType.value.trim(),
@@ -528,6 +541,8 @@ function createPanel(): void {
     deviceQueryOld.disabled = next;
     deviceSubmit.disabled = next;
     deviceSn.disabled = next;
+    deviceQuantity.disabled = next;
+    deviceEndSn.disabled = next;
     deviceNewId.disabled = next;
   };
   const clearNewAgent = () => {
@@ -543,24 +558,24 @@ function createPanel(): void {
     clearNewAgent();
   };
   const loadOldAgent = async () => {
-    const sn = deviceSn.value.trim();
+    const { sn, endSn, quantity } = readDeviceRange();
     clearOldAgent();
-    const agent = await queryOldDeviceAgent(sn);
+    const agent = await queryOldDeviceAgent(sn, quantity);
     deviceOldId.value = agent.id;
     deviceOldName.value = agent.name;
     deviceOldType.value = agent.type;
-    oldAgentLookupKey = sn;
-    log(`机具 ${sn} 的旧代理商: ${agent.id} ${agent.name}`);
+    oldAgentLookupKey = `${sn}|${quantity}`;
+    log(`机具 ${sn} 至 ${endSn}（${quantity} 台）的旧代理商: ${agent.id} ${agent.name}`);
   };
   const loadNewAgent = async () => {
-    const sn = deviceSn.value.trim();
-    if (oldAgentLookupKey !== sn) await loadOldAgent();
+    const { sn, quantity } = readDeviceRange();
+    if (oldAgentLookupKey !== `${sn}|${quantity}`) await loadOldAgent();
     const newAgentId = deviceNewId.value.trim();
     clearNewAgent();
     const agent = await queryNewDeviceAgent(sn, deviceOldId.value, newAgentId);
     deviceNewName.value = agent.name;
     deviceNewType.value = agent.type;
-    newAgentLookupKey = `${sn}|${deviceOldId.value}|${newAgentId}`;
+    newAgentLookupKey = `${sn}|${quantity}|${deviceOldId.value}|${newAgentId}`;
     log(`机具 ${sn} 的新代理商: ${agent.id} ${agent.name}`);
   };
   const runDeviceLookup = (label: string, runner: () => Promise<void>) => async () => {
@@ -578,16 +593,41 @@ function createPanel(): void {
       setDeviceBusy(false);
     }
   };
+  const updateDeviceRange = () => {
+    if (deviceBusy) return;
+    clearOldAgent();
+    try {
+      readDeviceRange();
+      setStatus(deviceStatus, '');
+    } catch (error) {
+      if (deviceRangeMode === 'quantity') deviceEndSn.value = '';
+      else deviceQuantity.value = '';
+      setStatus(deviceStatus, error instanceof Error ? error.message : String(error), true);
+    }
+  };
+  deviceSn.addEventListener('input', updateDeviceRange);
+  deviceQuantity.addEventListener('input', () => { deviceRangeMode = 'quantity'; updateDeviceRange(); });
+  deviceEndSn.addEventListener('input', () => { deviceRangeMode = 'endSn'; updateDeviceRange(); });
   deviceQueryOld.addEventListener('click', runDeviceLookup('查询旧代理商', loadOldAgent));
-  deviceSn.addEventListener('change', runDeviceLookup('查询旧代理商', loadOldAgent));
-  deviceNewId.addEventListener('change', runDeviceLookup('查询新代理商', loadNewAgent));
+  const autoLookupOldAgent = runDeviceLookup('查询旧代理商', loadOldAgent);
+  for (const input of [deviceSn, deviceQuantity, deviceEndSn]) {
+    input.addEventListener('blur', (event) => {
+      if (event.relatedTarget instanceof HTMLInputElement || event.relatedTarget === deviceQueryOld || event.relatedTarget === deviceSubmit) return;
+      void autoLookupOldAgent();
+    });
+  }
+  const autoLookupNewAgent = runDeviceLookup('查询新代理商', loadNewAgent);
+  deviceNewId.addEventListener('blur', (event) => {
+    if ([deviceSn, deviceQuantity, deviceEndSn, deviceSubmit, deviceQueryOld].includes(event.relatedTarget as HTMLInputElement)) return;
+    void autoLookupNewAgent();
+  });
   deviceSubmit.addEventListener('click', async () => {
     if (deviceBusy) return;
     setDeviceBusy(true);
     try {
-      const sn = deviceSn.value.trim();
-      if (oldAgentLookupKey !== sn) await loadOldAgent();
-      const newKey = `${sn}|${deviceOldId.value}|${deviceNewId.value.trim()}`;
+      const { sn, endSn, quantity } = readDeviceRange();
+      if (oldAgentLookupKey !== `${sn}|${quantity}`) await loadOldAgent();
+      const newKey = `${sn}|${quantity}|${deviceOldId.value}|${deviceNewId.value.trim()}`;
       if (newAgentLookupKey !== newKey) await loadNewAgent();
       setStatus(deviceStatus, '正在校验划拨条件...');
       await submitDeviceTransfer(deviceValues(), (message) => {
@@ -595,7 +635,7 @@ function createPanel(): void {
         log(message);
       });
       setStatus(deviceStatus, '机具划拨成功');
-      log(`机具 ${sn} 划拨成功`);
+      log(`机具 ${sn} 至 ${endSn}（${quantity} 台）划拨成功`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatus(deviceStatus, `机具划拨失败: ${message}`, true);

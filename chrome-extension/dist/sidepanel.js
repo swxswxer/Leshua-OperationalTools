@@ -3005,6 +3005,12 @@
 
   // src/api/sn-authorization.ts
   var ENDPOINT2 = `${ORIGIN}/base-business/pinpad/agentWhiteList.do`;
+  function authorizationAgentIssueError(agent) {
+    if (agent.status !== "\u5DF2\u751F\u6548") return "\u8BE5\u4EE3\u7406\u8BB0\u5F55\u5C1A\u672A\u751F\u6548";
+    if (!/^\d+$/.test(agent.id)) return "\u4EE3\u7406\u8BB0\u5F55\u7F3A\u5C11\u552F\u4E00\u53D1\u9001 ID";
+    if (!/^[^\s@*]+@[^\s@*]+\.[^\s@*]+$/.test(agent.email)) return "\u4EE3\u7406\u8BB0\u5F55\u90AE\u7BB1\u4E3A\u7A7A\u6216\u5DF2\u8131\u654F\uFF0C\u8BF7\u5148\u5728\u540E\u53F0\u6838\u5B9E";
+    return "";
+  }
   function parseHtml(html) {
     const doc = new DOMParser().parseFromString(html, "text/html");
     doc.querySelectorAll("script, style").forEach((node) => node.remove());
@@ -3028,7 +3034,7 @@
     });
     assertAgentApplyResponse(html);
   }
-  function parseAuthorizationAgent(html, agentId) {
+  function parseAuthorizationAgents(html, agentId) {
     const doc = parseHtml(html);
     const table = doc.querySelector("table.tablesorter");
     if (!table) throw new Error("\u4EE3\u7406\u8BB0\u5F55\u67E5\u8BE2\u54CD\u5E94\u683C\u5F0F\u5F02\u5E38\uFF0C\u672A\u53D1\u9001\u6388\u6743\u7801");
@@ -3037,34 +3043,30 @@
     if (required.some((name) => !headers2.includes(name))) throw new Error("\u4EE3\u7406\u8BB0\u5F55\u8868\u5934\u4E0D\u5B8C\u6574\uFF0C\u672A\u53D1\u9001\u6388\u6743\u7801");
     const pageText = normalizeText(doc.querySelector("table.page")?.textContent);
     const pageCount = pageText.match(/共\s*(\d+)\s*页/);
-    if (pageCount && Number(pageCount[1]) > 1) throw new Error("\u4EE3\u7406\u8BB0\u5F55\u6709\u591A\u9875\uFF0C\u8BF7\u5728\u540E\u53F0\u786E\u8BA4\u552F\u4E00\u6709\u6548\u63A5\u6536\u8BB0\u5F55");
     const matches = [];
     for (const tr of Array.from(table.querySelectorAll("tbody > tr"))) {
       const cells = Array.from(tr.children).filter((el) => el.tagName === "TD");
       const value = (name) => normalizeText(cells[headers2.indexOf(name)]?.textContent);
-      if (value("\u4EE3\u7406\u5546\u7F16\u53F7") !== agentId || value("\u72B6\u6001") !== "\u5DF2\u751F\u6548") continue;
+      if (value("\u4EE3\u7406\u5546\u7F16\u53F7") !== agentId) continue;
       const operation = cells[headers2.indexOf("\u64CD\u4F5C")];
       const ids = Array.from(operation?.querySelectorAll("a") || []).map((link) => {
         const onclick = link.getAttribute("onclick") || "";
         const path = onclick.match(/['"]([^'"]*agentWhiteList\.do\?method=issueCode[^'"]*)['"]/);
         return path ? new URL(path[1], ENDPOINT2).searchParams.get("id") : null;
-      }).filter((id) => Boolean(id));
-      if (ids.length !== 1 || !/^\d+$/.test(ids[0])) throw new Error("\u6709\u6548\u4EE3\u7406\u8BB0\u5F55\u7F3A\u5C11\u552F\u4E00\u53D1\u9001 ID");
-      const email = value("\u90AE\u7BB1");
-      if (!/^[^\s@*]+@[^\s@*]+\.[^\s@*]+$/.test(email)) throw new Error("\u4EE3\u7406\u8BB0\u5F55\u90AE\u7BB1\u4E3A\u7A7A\u6216\u5DF2\u8131\u654F\uFF0C\u8BF7\u5148\u5728\u540E\u53F0\u6838\u5B9E");
-      matches.push({ id: ids[0], agentId, email });
+      }).filter((id2) => Boolean(id2));
+      const id = ids.length === 1 && /^\d+$/.test(ids[0]) ? ids[0] : "";
+      matches.push({ id, agentId, email: value("\u90AE\u7BB1"), status: value("\u72B6\u6001") });
     }
-    if (matches.length > 1) throw new Error("\u5B58\u5728\u591A\u6761\u5DF2\u751F\u6548\u4EE3\u7406\u8BB0\u5F55\uFF0C\u8BF7\u5728\u540E\u53F0\u786E\u8BA4\u63A5\u6536\u90AE\u7BB1\u540E\u518D\u53D1\u9001");
-    return matches[0] || null;
+    return { records: matches, hasMore: !!pageCount && Number(pageCount[1]) > 1 };
   }
-  async function queryAuthorizationAgent(agentId) {
+  async function queryAuthorizationAgents(agentId) {
     const html = await requestText(`${ENDPOINT2}?method=list`, {
       method: "POST",
       timeoutMs: 15e3,
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: buildFormBody({ createTimeRange: "", status: "", applicant: "", phone: "", email: "", receiver: "", agentId, pageSize: 200 })
     });
-    return parseAuthorizationAgent(html, agentId);
+    return parseAuthorizationAgents(html, agentId);
   }
   function assertAuthorizationIssued(text) {
     let response;
@@ -3123,13 +3125,17 @@
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     });
   }
-  async function sendSnAuthorization(agentInput, snInput, progress) {
+  function querySnAuthorizationAgents(agentInput) {
+    return queryAuthorizationAgents(normalizeAgentId(agentInput));
+  }
+  async function sendSnAuthorization(agentInput, snInput, agent, progress) {
     const agentId = normalizeAgentId(agentInput);
     const sn = snInput.trim();
     if (!/^[A-Za-z0-9]+$/.test(sn)) throw new Error("\u8BF7\u586B\u5199\u4E50\u5237 SN\uFF0C\u53EA\u652F\u6301\u82F1\u6587\u5B57\u6BCD\u548C\u6570\u5B57");
-    progress("\u6B63\u5728\u67E5\u8BE2\u4EE3\u7406\u8BB0\u5F55...");
-    const agent = await queryAuthorizationAgent(agentId);
-    if (!agent) throw new Error("\u672A\u67E5\u8BE2\u5230\u5DF2\u751F\u6548\u4EE3\u7406\u8BB0\u5F55\uFF0C\u8BF7\u5148\u63D0\u4EA4\u4EE3\u7406\u5546\u4FE1\u606F");
+    if (!agent) throw new Error("\u8BF7\u5148\u67E5\u8BE2\u5E76\u9009\u62E9\u4E00\u6761\u4EE3\u7406\u8BB0\u5F55");
+    if (agent.agentId !== agentId) throw new Error("\u4EE3\u7406\u7F16\u53F7\u5DF2\u53D8\u66F4\uFF0C\u8BF7\u91CD\u65B0\u67E5\u8BE2\u5E76\u9009\u62E9\u8BB0\u5F55");
+    const issueError = authorizationAgentIssueError(agent);
+    if (issueError) throw new Error(issueError);
     progress("\u6B63\u5728\u751F\u6210 SN \u6388\u6743\u7801 Excel...");
     const response = await fetch(chrome.runtime.getURL("assets/sn_authorization_template.xlsx"), { signal: AbortSignal.timeout(1e4) });
     if (!response.ok) throw new Error("\u65E0\u6CD5\u52A0\u8F7D SN \u5B98\u65B9\u6A21\u677F\uFF0C\u8BF7\u91CD\u65B0\u52A0\u8F7D\u5B8C\u6574\u63D2\u4EF6");
@@ -3147,52 +3153,118 @@
   var snAuthorizationView = `
   <section id="syt-view-sn-authorization" class="view">
     <label>\u4EE3\u7406\u7F16\u53F7<input id="syt-sn-agent" inputmode="numeric" autocomplete="off"></label>
+    <button id="syt-sn-query" type="button">\u67E5\u8BE2\u4EE3\u7406\u8BB0\u5F55</button>
     <label>\u624B\u673A\u53F7<input id="syt-sn-phone" type="tel" autocomplete="off"></label>
     <label>\u53D1\u9001\u4EBA<input id="syt-sn-receiver" autocomplete="off" title="\u5BF9\u5E94\u540E\u53F0\u7684\u63A5\u6536\u4EBA\u5B57\u6BB5 receiver"></label>
     <label>\u90AE\u7BB1<input id="syt-sn-email" type="email" autocomplete="off"></label>
     <button id="syt-sn-apply" type="button">\u63D0\u4EA4\u4EE3\u7406\u5546\u4FE1\u606F</button>
+    <div id="syt-sn-records" class="sn-agent-records"></div>
     <div class="section-title">\u6388\u6743\u7801\u4E0B\u53D1</div>
     <label>\u4E50\u5237 SN<input id="syt-sn-value" autocomplete="off"></label>
-    <button id="syt-sn-send" type="button" class="primary">\u53D1\u9001\u6388\u6743\u7801</button>
+    <button id="syt-sn-send" type="button" class="primary" disabled>\u53D1\u9001\u6388\u6743\u7801</button>
     <div id="syt-sn-status" class="status" role="status" aria-live="polite"></div>
   </section>`;
   function initializeSnAuthorization(root, log) {
     const view = root.querySelector("#syt-view-sn-authorization");
     const status = view.querySelector("#syt-sn-status");
+    const recordsView = view.querySelector("#syt-sn-records");
+    const agentInput = view.querySelector("#syt-sn-agent");
+    const send = view.querySelector("#syt-sn-send");
     const value = (id) => view.querySelector(`#syt-sn-${id}`).value;
     let busy = false;
-    for (const action of ["apply", "send"]) {
+    let selected = null;
+    const update = (message, error = false) => {
+      status.textContent = message;
+      status.className = `status${error ? " error" : ""}`;
+      log(message, error);
+    };
+    const updateControls = () => {
+      view.querySelectorAll("input, button").forEach((control) => {
+        control.disabled = busy || control.dataset.unavailable === "true";
+      });
+      send.disabled = busy || !selected;
+    };
+    const clearRecords = () => {
+      selected = null;
+      recordsView.replaceChildren();
+      updateControls();
+    };
+    const renderRecords = (records) => {
+      recordsView.replaceChildren();
+      if (!records.length) return;
+      const table = document.createElement("table");
+      table.className = "sn-agent-table";
+      const caption = document.createElement("caption");
+      caption.className = "sr-only";
+      caption.textContent = "\u9009\u62E9\u6388\u6743\u7801\u63A5\u6536\u8BB0\u5F55";
+      table.append(caption);
+      const header = table.createTHead().insertRow();
+      for (const label of ["\u9009\u62E9", "\u4EE3\u7406\u7F16\u53F7", "\u90AE\u7BB1", "\u8BB0\u5F55\u72B6\u6001"]) {
+        const th = document.createElement("th");
+        th.scope = "col";
+        th.textContent = label;
+        header.append(th);
+      }
+      const body = table.createTBody();
+      records.forEach((record, index) => {
+        const row = body.insertRow();
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = "syt-sn-selected-record";
+        radio.value = String(index);
+        radio.setAttribute("aria-label", `\u9009\u62E9\u4EE3\u7406 ${record.agentId}\uFF0C\u90AE\u7BB1 ${record.email}\uFF0C\u72B6\u6001 ${record.status}`);
+        const issueError = authorizationAgentIssueError(record);
+        radio.disabled = !!issueError;
+        radio.dataset.unavailable = String(!!issueError);
+        if (issueError) radio.title = issueError;
+        radio.addEventListener("change", () => {
+          if (!radio.checked || busy) return;
+          selected = record;
+          body.querySelectorAll("tr").forEach((item) => item.classList.toggle("selected", item === row));
+          updateControls();
+          update(`\u5DF2\u9009\u62E9\u4EE3\u7406 ${record.agentId}\uFF0C\u63A5\u6536\u90AE\u7BB1\uFF1A${record.email}`);
+        });
+        row.insertCell().append(radio);
+        for (const text of [record.agentId, record.email, record.status]) row.insertCell().textContent = text || "-";
+        if (issueError) {
+          row.className = "muted";
+          row.title = issueError;
+        }
+      });
+      recordsView.append(table);
+    };
+    agentInput.addEventListener("input", () => {
+      clearRecords();
+      status.textContent = "";
+    });
+    for (const action of ["apply", "query", "send"]) {
       view.querySelector(`#syt-sn-${action}`).addEventListener("click", async () => {
         if (busy) return;
         busy = true;
-        const controls = view.querySelectorAll("input, button");
-        controls.forEach((control) => {
-          control.disabled = true;
-        });
-        const update = (message, error = false) => {
-          status.style.color = "";
-          status.textContent = message;
-          status.className = `status${error ? " error" : ""}`;
-          log(message, error);
-        };
+        updateControls();
         try {
           if (action === "apply") {
             update("\u6B63\u5728\u63D0\u4EA4\u4EE3\u7406\u5546\u4FE1\u606F...");
             await submitAgentContact({ agentId: value("agent"), phone: value("phone"), receiver: value("receiver"), email: value("email") });
-            update("\u4EE3\u7406\u5546\u4FE1\u606F\u63D0\u4EA4\u6210\u529F");
+            clearRecords();
+            update("\u4EE3\u7406\u5546\u4FE1\u606F\u63D0\u4EA4\u6210\u529F\uFF0C\u8BF7\u67E5\u8BE2\u5E76\u9009\u62E9\u63A5\u6536\u8BB0\u5F55");
+          } else if (action === "query") {
+            clearRecords();
+            update("\u6B63\u5728\u67E5\u8BE2\u4EE3\u7406\u8BB0\u5F55...");
+            const result = await querySnAuthorizationAgents(value("agent"));
+            renderRecords(result.records);
+            const more = result.hasMore ? "\uFF1B\u5F53\u524D\u4EC5\u663E\u793A\u524D 200 \u6761\uFF0C\u5176\u4F59\u8BB0\u5F55\u8BF7\u5230\u540E\u53F0\u67E5\u770B" : "";
+            update(result.records.length ? `\u67E5\u8BE2\u5230 ${result.records.length} \u6761\u8BB0\u5F55\uFF0C\u8BF7\u9009\u62E9\u5DF2\u751F\u6548\u7684\u63A5\u6536\u8BB0\u5F55${more}` : "\u672A\u67E5\u8BE2\u5230\u4EE3\u7406\u8BB0\u5F55\uFF0C\u8BF7\u5148\u63D0\u4EA4\u4EE3\u7406\u5546\u4FE1\u606F");
           } else {
-            const email = await sendSnAuthorization(value("agent"), value("value"), update);
+            const email = await sendSnAuthorization(value("agent"), value("value"), selected, (message) => update(message));
             update(`\u6388\u6743\u7801\u53D1\u9001\u6210\u529F\uFF0C\u63A5\u6536\u90AE\u7BB1\uFF1A${email}`);
           }
-          status.style.color = "#15803d";
         } catch (error) {
-          update(`${action === "apply" ? "\u4EE3\u7406\u5546\u4FE1\u606F\u63D0\u4EA4" : "\u6388\u6743\u7801\u53D1\u9001"}\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`, true);
-          status.style.color = "";
+          const label = { apply: "\u4EE3\u7406\u5546\u4FE1\u606F\u63D0\u4EA4", query: "\u4EE3\u7406\u8BB0\u5F55\u67E5\u8BE2", send: "\u6388\u6743\u7801\u53D1\u9001" }[action];
+          update(`${label}\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`, true);
         } finally {
           busy = false;
-          controls.forEach((control) => {
-            control.disabled = false;
-          });
+          updateControls();
         }
       });
     }
@@ -4185,16 +4257,21 @@ ${row.node}`]) {
   }
   function validateDeviceTransfer(values) {
     if (!trim(values.sn)) throw new Error("\u8BF7\u8F93\u5165\u4E50\u5237 SN \u59CB");
-    if (values.quantity !== "1") throw new Error("\u673A\u5177\u5212\u62E8\u6570\u91CF\u56FA\u5B9A\u4E3A 1");
+    normalizeDeviceQuantity(values.quantity);
     if (!trim(values.oldAgentId) || !trim(values.newAgentId)) throw new Error("\u8BF7\u5148\u67E5\u8BE2\u65E7\u4EE3\u7406\u5546\u548C\u65B0\u4EE3\u7406\u5546\u4FE1\u606F");
     if (trim(values.oldAgentId) === trim(values.newAgentId)) throw new Error("\u65B0\u65E7\u4EE3\u7406\u5546\u7F16\u53F7\u4E0D\u80FD\u76F8\u540C");
   }
-  async function queryOldDeviceAgent(sn, fetchImpl) {
+  function normalizeDeviceQuantity(quantity) {
+    const value = quantity.trim();
+    if (!/^\d+$/.test(value) || BigInt(value) < 1n) throw new Error("\u673A\u5177\u5212\u62E8\u6570\u91CF\u5FC5\u987B\u4E3A\u6B63\u6574\u6570");
+    return BigInt(value).toString();
+  }
+  async function queryOldDeviceAgent(sn, quantity = "1", fetchImpl) {
     const deviceSn = trim(sn);
     if (!deviceSn) throw new Error("\u8BF7\u8F93\u5165\u4E50\u5237 SN \u59CB");
     const data = await request("changeAgentCheckSn", {
       pinpadUuidStart: deviceSn,
-      pinpadUuidTotal: "1"
+      pinpadUuidTotal: normalizeDeviceQuantity(quantity)
     }, fetchImpl);
     const id = trim(String(data?.oldAgentId || ""));
     if (!id) throw new Error("\u63A5\u53E3\u672A\u8FD4\u56DE\u65E7\u4EE3\u7406\u5546\u7F16\u53F7");
@@ -4217,7 +4294,7 @@ ${row.node}`]) {
     validateDeviceTransfer(values);
     const requestValues = {
       pinpadUuidStart: trim(values.sn),
-      pinpadUuidTotal: "1",
+      pinpadUuidTotal: normalizeDeviceQuantity(values.quantity),
       oldAgentId: trim(values.oldAgentId),
       newAgentId: trim(values.newAgentId)
     };
@@ -4283,7 +4360,33 @@ ${row.node}`]) {
   }
 
   // src/tools/device-transfer.ts
-  var queryOldDeviceAgent2 = (sn) => queryOldDeviceAgent(sn);
+  function normalizeSn(value) {
+    const sn = value.trim();
+    if (!/^[A-Za-z0-9]+$/.test(sn)) throw new Error("\u4E50\u5237 SN \u4E0D\u80FD\u4E3A\u7A7A\uFF0C\u4E14\u53EA\u80FD\u5305\u542B\u82F1\u6587\u5B57\u6BCD\u548C\u6570\u5B57");
+    return sn;
+  }
+  function deviceRangeFromQuantity(snInput, quantityInput) {
+    const sn = normalizeSn(snInput);
+    const quantity = normalizeDeviceQuantity(quantityInput);
+    if (quantity === "1") return { sn, endSn: sn, quantity };
+    const suffix = sn.match(/^(.*?)(\d+)$/);
+    if (!suffix) throw new Error("\u6279\u91CF\u5212\u62E8\u7684 SN \u5FC5\u987B\u4EE5\u6570\u5B57\u7ED3\u5C3E");
+    const end = (BigInt(suffix[2]) + BigInt(quantity) - 1n).toString().padStart(suffix[2].length, "0");
+    return { sn, endSn: `${suffix[1]}${end}`, quantity };
+  }
+  function deviceRangeFromEndSn(snInput, endInput) {
+    const sn = normalizeSn(snInput);
+    const endSn = normalizeSn(endInput);
+    if (sn === endSn) return { sn, endSn, quantity: "1" };
+    const start = sn.match(/^(.*?)(\d+)$/);
+    const end = endSn.match(/^(.*?)(\d+)$/);
+    if (!start || !end || start[1] !== end[1]) throw new Error("\u8D77\u59CB SN \u4E0E\u672B SN \u7684\u56FA\u5B9A\u524D\u7F00\u5FC5\u987B\u76F8\u540C\uFF0C\u4E14\u5747\u4EE5\u6570\u5B57\u7ED3\u5C3E");
+    if (BigInt(end[2]) < BigInt(start[2])) throw new Error("\u672B SN \u4E0D\u80FD\u5C0F\u4E8E\u8D77\u59CB SN");
+    const quantity = (BigInt(end[2]) - BigInt(start[2]) + 1n).toString();
+    if (deviceRangeFromQuantity(sn, quantity).endSn !== endSn) throw new Error("\u672B SN \u7684\u4F4D\u6570\u6216\u7F16\u53F7\u683C\u5F0F\u4E0E\u8D77\u59CB SN \u4E0D\u4E00\u81F4");
+    return { sn, endSn, quantity };
+  }
+  var queryOldDeviceAgent2 = (sn, quantity = "1") => queryOldDeviceAgent(sn, quantity);
   var queryNewDeviceAgent2 = (sn, oldAgentId, newAgentId) => queryNewDeviceAgent(sn, oldAgentId, newAgentId);
   var submitDeviceTransfer2 = (values, onStep) => submitDeviceTransfer(values, onStep);
   var submitLhsdDeviceTransfer2 = (values) => submitLhsdDeviceTransfer(values);
@@ -4356,7 +4459,7 @@ ${row.node}`]) {
           <button id="syt-run-bind-config" class="primary" type="button">\u786E\u8BA4\u914D\u7F6E</button><div id="syt-bind-config-status" class="status" role="status"></div>
         </section>
         <section id="syt-view-code" class="view"><div class="form-row"><label>\u7801\u724C\u5F00\u59CB\u7F16\u53F7<input id="syt-code-start" autocomplete="off"></label><label>\u7801\u724C\u7ED3\u675F\u7F16\u53F7<input id="syt-code-end" autocomplete="off"></label></div><div class="form-row"><label>\u539F\u4EE3\u7406\u5546<input id="syt-code-source" autocomplete="off"></label><label>\u65B0\u4EE3\u7406\u5546<input id="syt-code-target" autocomplete="off"></label></div><button id="syt-run-code" class="primary" type="button">\u786E\u8BA4\u5212\u8F6C</button><div id="syt-code-status" class="status"></div></section>
-        <section id="syt-view-device" class="view"><div class="section-title">\u673A\u5177\u4FE1\u606F</div><div class="form-row"><label>\u4E50\u5237 SN \u59CB<input id="syt-device-sn" autocomplete="off"></label><label>\u6570\u91CF<input id="syt-device-quantity" value="1" readonly></label></div><button id="syt-device-query-old" type="button">\u67E5\u8BE2\u65E7\u4EE3\u7406\u5546</button><div class="section-title">\u65E7\u4EE3\u7406\u5546</div><label>\u65E7\u4EE3\u7406\u5546\u7F16\u53F7<input id="syt-device-old-id" readonly></label><label>\u65E7\u4EE3\u7406\u5546\u540D\u79F0<input id="syt-device-old-name" readonly></label><label>\u65E7\u4EE3\u7406\u5546\u7C7B\u578B<input id="syt-device-old-type" readonly></label><div class="section-title">\u65B0\u4EE3\u7406\u5546</div><label>\u65B0\u4EE3\u7406\u5546\u7F16\u53F7<input id="syt-device-new-id" autocomplete="off"></label><label>\u65B0\u4EE3\u7406\u5546\u540D\u79F0<input id="syt-device-new-name" readonly></label><label>\u65B0\u4EE3\u7406\u5546\u7C7B\u578B<input id="syt-device-new-type" readonly></label><button id="syt-run-device" class="primary" type="button">\u786E\u8BA4\u5212\u62E8</button><div id="syt-device-status" class="status"></div></section>
+        <section id="syt-view-device" class="view"><div class="section-title">\u673A\u5177\u4FE1\u606F</div><div class="form-row"><label>\u4E50\u5237 SN \u59CB<input id="syt-device-sn" autocomplete="off"></label><label>\u6570\u91CF<input id="syt-device-quantity" type="number" min="1" step="1" value="1"></label></div><label>\u672B SN<input id="syt-device-end-sn" autocomplete="off"></label><button id="syt-device-query-old" type="button">\u67E5\u8BE2\u65E7\u4EE3\u7406\u5546</button><div class="section-title">\u65E7\u4EE3\u7406\u5546</div><label>\u65E7\u4EE3\u7406\u5546\u7F16\u53F7<input id="syt-device-old-id" readonly></label><label>\u65E7\u4EE3\u7406\u5546\u540D\u79F0<input id="syt-device-old-name" readonly></label><label>\u65E7\u4EE3\u7406\u5546\u7C7B\u578B<input id="syt-device-old-type" readonly></label><div class="section-title">\u65B0\u4EE3\u7406\u5546</div><label>\u65B0\u4EE3\u7406\u5546\u7F16\u53F7<input id="syt-device-new-id" autocomplete="off"></label><label>\u65B0\u4EE3\u7406\u5546\u540D\u79F0<input id="syt-device-new-name" readonly></label><label>\u65B0\u4EE3\u7406\u5546\u7C7B\u578B<input id="syt-device-new-type" readonly></label><button id="syt-run-device" class="primary" type="button">\u786E\u8BA4\u5212\u62E8</button><div id="syt-device-status" class="status"></div></section>
         <section id="syt-view-lhsd-device" class="view"><label>SN<input id="syt-lhsd-device-sn" autocomplete="off"></label><label>\u65E7\u4EE3\u7406\u5546\u7F16\u53F7<input id="syt-lhsd-device-old-id" autocomplete="off"></label><label>\u65B0\u4EE3\u7406\u5546\u7F16\u53F7<input id="syt-lhsd-device-new-id" autocomplete="off"></label><button id="syt-run-lhsd-device" class="primary" type="button">\u786E\u8BA4\u5212\u62E8</button><div id="syt-lhsd-device-status" class="status"></div></section>
         <section id="syt-view-whitelist" class="view"><div class="form-row"><label>\u624B\u673A\u53F7<input id="syt-white-mobile" autocomplete="off"></label><label>\u8EAB\u4EFD\u8BC1\u53F7<input id="syt-white-id" autocomplete="off"></label></div><div class="form-row"><label>\u8425\u4E1A\u6267\u7167\u53F7<input id="syt-white-license" autocomplete="off"></label><label>\u7ED3\u7B97\u8D26\u53F7<input id="syt-white-account" autocomplete="off"></label></div><button id="syt-white-clear" type="button">\u6E05\u7A7A</button><button id="syt-run-whitelist" class="primary" type="button">\u6DFB\u52A0\u9632\u5207\u6237\u767D\u540D\u5355</button><div id="syt-white-status" class="status"></div></section>
         <section class="log"><div class="log-actions"><button id="syt-log-toggle" class="text-button" type="button" aria-expanded="false" aria-controls="syt-log-full">${icon("chevron")}\u8FD0\u884C\u65E5\u5FD7</button><button id="syt-log-clear" class="icon-button" type="button" title="\u6E05\u7A7A\u65E5\u5FD7" aria-label="\u6E05\u7A7A\u65E5\u5FD7">${icon("trash")}</button></div><div id="syt-log-preview" aria-live="polite">\u7B49\u5F85\u6267\u884C</div><div id="syt-log-full"></div></section>
@@ -4767,6 +4870,8 @@ ${merchantList}
       }
     });
     const deviceSn = byId(root, "syt-device-sn");
+    const deviceQuantity = byId(root, "syt-device-quantity");
+    const deviceEndSn = byId(root, "syt-device-end-sn");
     const deviceOldId = byId(root, "syt-device-old-id");
     const deviceOldName = byId(root, "syt-device-old-name");
     const deviceOldType = byId(root, "syt-device-old-type");
@@ -4779,9 +4884,16 @@ ${merchantList}
     let deviceBusy = false;
     let oldAgentLookupKey = "";
     let newAgentLookupKey = "";
+    let deviceRangeMode = "quantity";
+    const readDeviceRange = () => {
+      const range = deviceRangeMode === "quantity" ? deviceRangeFromQuantity(deviceSn.value, deviceQuantity.value) : deviceRangeFromEndSn(deviceSn.value, deviceEndSn.value);
+      deviceQuantity.value = range.quantity;
+      deviceEndSn.value = range.endSn;
+      return range;
+    };
     const deviceValues = () => ({
       sn: deviceSn.value.trim(),
-      quantity: "1",
+      quantity: readDeviceRange().quantity,
       oldAgentId: deviceOldId.value.trim(),
       oldAgentName: deviceOldName.value.trim(),
       oldAgentType: deviceOldType.value.trim(),
@@ -4794,6 +4906,8 @@ ${merchantList}
       deviceQueryOld.disabled = next;
       deviceSubmit.disabled = next;
       deviceSn.disabled = next;
+      deviceQuantity.disabled = next;
+      deviceEndSn.disabled = next;
       deviceNewId.disabled = next;
     };
     const clearNewAgent = () => {
@@ -4809,24 +4923,24 @@ ${merchantList}
       clearNewAgent();
     };
     const loadOldAgent = async () => {
-      const sn = deviceSn.value.trim();
+      const { sn, endSn, quantity } = readDeviceRange();
       clearOldAgent();
-      const agent = await queryOldDeviceAgent2(sn);
+      const agent = await queryOldDeviceAgent2(sn, quantity);
       deviceOldId.value = agent.id;
       deviceOldName.value = agent.name;
       deviceOldType.value = agent.type;
-      oldAgentLookupKey = sn;
-      log(`\u673A\u5177 ${sn} \u7684\u65E7\u4EE3\u7406\u5546: ${agent.id} ${agent.name}`);
+      oldAgentLookupKey = `${sn}|${quantity}`;
+      log(`\u673A\u5177 ${sn} \u81F3 ${endSn}\uFF08${quantity} \u53F0\uFF09\u7684\u65E7\u4EE3\u7406\u5546: ${agent.id} ${agent.name}`);
     };
     const loadNewAgent = async () => {
-      const sn = deviceSn.value.trim();
-      if (oldAgentLookupKey !== sn) await loadOldAgent();
+      const { sn, quantity } = readDeviceRange();
+      if (oldAgentLookupKey !== `${sn}|${quantity}`) await loadOldAgent();
       const newAgentId = deviceNewId.value.trim();
       clearNewAgent();
       const agent = await queryNewDeviceAgent2(sn, deviceOldId.value, newAgentId);
       deviceNewName.value = agent.name;
       deviceNewType.value = agent.type;
-      newAgentLookupKey = `${sn}|${deviceOldId.value}|${newAgentId}`;
+      newAgentLookupKey = `${sn}|${quantity}|${deviceOldId.value}|${newAgentId}`;
       log(`\u673A\u5177 ${sn} \u7684\u65B0\u4EE3\u7406\u5546: ${agent.id} ${agent.name}`);
     };
     const runDeviceLookup = (label, runner) => async () => {
@@ -4844,16 +4958,47 @@ ${merchantList}
         setDeviceBusy(false);
       }
     };
+    const updateDeviceRange = () => {
+      if (deviceBusy) return;
+      clearOldAgent();
+      try {
+        readDeviceRange();
+        setStatus(deviceStatus, "");
+      } catch (error) {
+        if (deviceRangeMode === "quantity") deviceEndSn.value = "";
+        else deviceQuantity.value = "";
+        setStatus(deviceStatus, error instanceof Error ? error.message : String(error), true);
+      }
+    };
+    deviceSn.addEventListener("input", updateDeviceRange);
+    deviceQuantity.addEventListener("input", () => {
+      deviceRangeMode = "quantity";
+      updateDeviceRange();
+    });
+    deviceEndSn.addEventListener("input", () => {
+      deviceRangeMode = "endSn";
+      updateDeviceRange();
+    });
     deviceQueryOld.addEventListener("click", runDeviceLookup("\u67E5\u8BE2\u65E7\u4EE3\u7406\u5546", loadOldAgent));
-    deviceSn.addEventListener("change", runDeviceLookup("\u67E5\u8BE2\u65E7\u4EE3\u7406\u5546", loadOldAgent));
-    deviceNewId.addEventListener("change", runDeviceLookup("\u67E5\u8BE2\u65B0\u4EE3\u7406\u5546", loadNewAgent));
+    const autoLookupOldAgent = runDeviceLookup("\u67E5\u8BE2\u65E7\u4EE3\u7406\u5546", loadOldAgent);
+    for (const input of [deviceSn, deviceQuantity, deviceEndSn]) {
+      input.addEventListener("blur", (event) => {
+        if (event.relatedTarget instanceof HTMLInputElement || event.relatedTarget === deviceQueryOld || event.relatedTarget === deviceSubmit) return;
+        void autoLookupOldAgent();
+      });
+    }
+    const autoLookupNewAgent = runDeviceLookup("\u67E5\u8BE2\u65B0\u4EE3\u7406\u5546", loadNewAgent);
+    deviceNewId.addEventListener("blur", (event) => {
+      if ([deviceSn, deviceQuantity, deviceEndSn, deviceSubmit, deviceQueryOld].includes(event.relatedTarget)) return;
+      void autoLookupNewAgent();
+    });
     deviceSubmit.addEventListener("click", async () => {
       if (deviceBusy) return;
       setDeviceBusy(true);
       try {
-        const sn = deviceSn.value.trim();
-        if (oldAgentLookupKey !== sn) await loadOldAgent();
-        const newKey = `${sn}|${deviceOldId.value}|${deviceNewId.value.trim()}`;
+        const { sn, endSn, quantity } = readDeviceRange();
+        if (oldAgentLookupKey !== `${sn}|${quantity}`) await loadOldAgent();
+        const newKey = `${sn}|${quantity}|${deviceOldId.value}|${deviceNewId.value.trim()}`;
         if (newAgentLookupKey !== newKey) await loadNewAgent();
         setStatus(deviceStatus, "\u6B63\u5728\u6821\u9A8C\u5212\u62E8\u6761\u4EF6...");
         await submitDeviceTransfer2(deviceValues(), (message) => {
@@ -4861,7 +5006,7 @@ ${merchantList}
           log(message);
         });
         setStatus(deviceStatus, "\u673A\u5177\u5212\u62E8\u6210\u529F");
-        log(`\u673A\u5177 ${sn} \u5212\u62E8\u6210\u529F`);
+        log(`\u673A\u5177 ${sn} \u81F3 ${endSn}\uFF08${quantity} \u53F0\uFF09\u5212\u62E8\u6210\u529F`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         setStatus(deviceStatus, `\u673A\u5177\u5212\u62E8\u5931\u8D25: ${message}`, true);

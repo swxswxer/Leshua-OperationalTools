@@ -1,5 +1,6 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
-import { applyAuthorizationAgent, queryAuthorizationAgent, issueAuthorizationCode, type AgentContact } from '../api/sn-authorization';
+import { applyAuthorizationAgent, queryAuthorizationAgents, issueAuthorizationCode, authorizationAgentIssueError, type AgentContact, type AuthorizationAgent } from '../api/sn-authorization';
+export { authorizationAgentIssueError, type AuthorizationAgent } from '../api/sn-authorization';
 
 export function normalizeAgentId(value: string): string {
   const id = value.trim();
@@ -36,13 +37,18 @@ export function createSnAuthorizationFile(bytes: Uint8Array, sn: string): File {
   });
 }
 
-export async function sendSnAuthorization(agentInput: string, snInput: string, progress: (message: string) => void): Promise<string> {
+export function querySnAuthorizationAgents(agentInput: string) {
+  return queryAuthorizationAgents(normalizeAgentId(agentInput));
+}
+
+export async function sendSnAuthorization(agentInput: string, snInput: string, agent: AuthorizationAgent | null, progress: (message: string) => void): Promise<string> {
   const agentId = normalizeAgentId(agentInput);
   const sn = snInput.trim();
   if (!/^[A-Za-z0-9]+$/.test(sn)) throw new Error('请填写乐刷 SN，只支持英文字母和数字');
-  progress('正在查询代理记录...');
-  const agent = await queryAuthorizationAgent(agentId);
-  if (!agent) throw new Error('未查询到已生效代理记录，请先提交代理商信息');
+  if (!agent) throw new Error('请先查询并选择一条代理记录');
+  if (agent.agentId !== agentId) throw new Error('代理编号已变更，请重新查询并选择记录');
+  const issueError = authorizationAgentIssueError(agent);
+  if (issueError) throw new Error(issueError);
   progress('正在生成 SN 授权码 Excel...');
   const response = await fetch(chrome.runtime.getURL('assets/sn_authorization_template.xlsx'), { signal: AbortSignal.timeout(10000) });
   if (!response.ok) throw new Error('无法加载 SN 官方模板，请重新加载完整插件');
