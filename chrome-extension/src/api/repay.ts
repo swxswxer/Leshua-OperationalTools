@@ -1,7 +1,8 @@
 import { ORIGIN, assertMerchantId, buildFormBody, normalizeText, requestText } from './http';
 
 export type Settlement = 'T0' | 'T1';
-export interface RepayRow { type: Settlement; billId: string; merchantId: string; date: string; reason: string; selectable: boolean }
+export type RepayRoute = 'AUTO' | 'EPCC';
+export interface RepayRow { type: Settlement; billId: string; merchantId: string; date: string; reason: string; selectable: boolean; routeId?: string }
 export interface RepayPage { rows: RepayRow[]; page: number; pages: number }
 const headers = { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' };
 const endpoint = (type: Settlement, method: string) => {
@@ -42,7 +43,7 @@ export function parseRepayPage(html: string, type: Settlement, merchantId: strin
     if (get('商户号') !== merchantId) throw new Error('后台返回了其他商户的记录，已停止处理');
     const checkbox = tr.querySelector<HTMLInputElement>('input[name="select_item"]');
     const selectable = !!checkbox && !checkbox.disabled && checkbox.value.split('_')[0] === billId && /^\d+$/.test(billId);
-    rows.push({ type, billId, merchantId, date: get('结算日期'), reason: get('失败原因'), selectable });
+    rows.push({ type, billId, merchantId, date: get('结算日期'), reason: get('失败原因'), selectable, routeId: checkbox?.value });
   });
   const pagination = body.match(/第\s*(\d+)\s*页[，,]?\s*共\s*(\d+)\s*页/);
   if (!pagination) {
@@ -67,4 +68,21 @@ export function parseRepayResponse(text: string): { accepted: boolean; message: 
 export async function applyRepay(type: Settlement, billIds: string[]) {
   if (!billIds.length || billIds.some(id => !/^\d+$/.test(id)) || new Set(billIds).size !== billIds.length) throw new Error('打款单号为空、重复或格式不正确');
   return parseRepayResponse(await requestText(endpoint(type, 'applyAutoRepay'), { method: 'POST', headers, body: buildFormBody({ ids: billIds.join(',') }) }));
+}
+
+export function parseRepayRouteId(type: Settlement, id: string): { billId: string; merchantId: string } {
+  const parts = id.split('_');
+  const count = type === 'T0' ? 4 : type === 'T1' ? 3 : 0;
+  if (!count || parts.length !== count || parts.some(part => !/^\d+$/.test(part)) || !/^\d{10}$/.test(parts[1])) {
+    throw new Error('指定网联重出所需的完整记录标识缺失或格式错误，请重新查询');
+  }
+  return { billId: parts[0], merchantId: parts[1] };
+}
+
+export async function applyRepayWithRoute(type: Settlement, ids: string[]) {
+  if (!ids.length || new Set(ids).size !== ids.length) throw new Error('指定网联重出的记录标识为空或重复');
+  ids.forEach(id => parseRepayRouteId(type, id));
+  return parseRepayResponse(await requestText(endpoint(type, 'applyAutoRepayWithRoute'), {
+    method: 'POST', headers, body: buildFormBody({ ids: ids.join(','), channelId: 'EPCC' }),
+  }));
 }

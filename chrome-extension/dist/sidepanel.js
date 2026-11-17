@@ -3968,7 +3968,7 @@ ${row.node}`]) {
       if (get("\u5546\u6237\u53F7") !== merchantId) throw new Error("\u540E\u53F0\u8FD4\u56DE\u4E86\u5176\u4ED6\u5546\u6237\u7684\u8BB0\u5F55\uFF0C\u5DF2\u505C\u6B62\u5904\u7406");
       const checkbox = tr.querySelector('input[name="select_item"]');
       const selectable = !!checkbox && !checkbox.disabled && checkbox.value.split("_")[0] === billId && /^\d+$/.test(billId);
-      rows.push({ type, billId, merchantId, date: get("\u7ED3\u7B97\u65E5\u671F"), reason: get("\u5931\u8D25\u539F\u56E0"), selectable });
+      rows.push({ type, billId, merchantId, date: get("\u7ED3\u7B97\u65E5\u671F"), reason: get("\u5931\u8D25\u539F\u56E0"), selectable, routeId: checkbox?.value });
     });
     const pagination = body.match(/第\s*(\d+)\s*页[，,]?\s*共\s*(\d+)\s*页/);
     if (!pagination) {
@@ -3997,9 +3997,35 @@ ${row.node}`]) {
     if (!billIds.length || billIds.some((id) => !/^\d+$/.test(id)) || new Set(billIds).size !== billIds.length) throw new Error("\u6253\u6B3E\u5355\u53F7\u4E3A\u7A7A\u3001\u91CD\u590D\u6216\u683C\u5F0F\u4E0D\u6B63\u786E");
     return parseRepayResponse(await requestText(endpoint(type, "applyAutoRepay"), { method: "POST", headers, body: buildFormBody({ ids: billIds.join(",") }) }));
   }
+  function parseRepayRouteId(type, id) {
+    const parts = id.split("_");
+    const count = type === "T0" ? 4 : type === "T1" ? 3 : 0;
+    if (!count || parts.length !== count || parts.some((part) => !/^\d+$/.test(part)) || !/^\d{10}$/.test(parts[1])) {
+      throw new Error("\u6307\u5B9A\u7F51\u8054\u91CD\u51FA\u6240\u9700\u7684\u5B8C\u6574\u8BB0\u5F55\u6807\u8BC6\u7F3A\u5931\u6216\u683C\u5F0F\u9519\u8BEF\uFF0C\u8BF7\u91CD\u65B0\u67E5\u8BE2");
+    }
+    return { billId: parts[0], merchantId: parts[1] };
+  }
+  async function applyRepayWithRoute(type, ids) {
+    if (!ids.length || new Set(ids).size !== ids.length) throw new Error("\u6307\u5B9A\u7F51\u8054\u91CD\u51FA\u7684\u8BB0\u5F55\u6807\u8BC6\u4E3A\u7A7A\u6216\u91CD\u590D");
+    ids.forEach((id) => parseRepayRouteId(type, id));
+    return parseRepayResponse(await requestText(endpoint(type, "applyAutoRepayWithRoute"), {
+      method: "POST",
+      headers,
+      body: buildFormBody({ ids: ids.join(","), channelId: "EPCC" })
+    }));
+  }
 
   // src/tools/repay.ts
   var repayKey = (row) => `${row.type}:${row.billId}`;
+  function canRepayWithRoute(row) {
+    if (!row.routeId) return false;
+    try {
+      const id = parseRepayRouteId(row.type, row.routeId);
+      return id.billId === row.billId && id.merchantId === row.merchantId;
+    } catch {
+      return false;
+    }
+  }
   async function queryRepayChannel(type, merchantId, range) {
     const rows = [];
     const seen = /* @__PURE__ */ new Set();
@@ -4029,21 +4055,25 @@ ${row.node}`]) {
     return { rows, errors, range, merchantId: id };
   }
   async function submitSelectedRepay(rows, merchantId, onResult = () => {
-  }) {
+  }, route = "AUTO") {
     assertMerchantId(merchantId);
     if (!rows.length || rows.some((row) => !row.selectable || row.merchantId !== merchantId || !["T0", "T1"].includes(row.type) || !/^\d+$/.test(row.billId))) throw new Error("\u6240\u9009\u8BB0\u5F55\u4E0D\u5C5E\u4E8E\u5F53\u524D\u5546\u6237\u6216\u4E0D\u53EF\u7533\u8BF7\uFF0C\u8BF7\u91CD\u65B0\u67E5\u8BE2");
     if (new Set(rows.map(repayKey)).size !== rows.length) throw new Error("\u5B58\u5728\u91CD\u590D\u6253\u6B3E\u5355");
+    if (route !== "AUTO" && route !== "EPCC") throw new Error("\u672A\u77E5\u91CD\u51FA\u901A\u9053");
+    if (route === "EPCC" && rows.some((row) => !canRepayWithRoute(row))) throw new Error("\u6240\u9009\u8BB0\u5F55\u7F3A\u5C11\u6307\u5B9A\u7F51\u8054\u91CD\u51FA\u6240\u9700\u7684\u5B8C\u6574\u6807\u8BC6\uFF0C\u6216\u6807\u8BC6\u4E0E\u5546\u6237\u3001\u6253\u6B3E\u5355\u4E0D\u4E00\u81F4\uFF0C\u8BF7\u91CD\u65B0\u67E5\u8BE2");
     const results = [];
     for (const type of ["T0", "T1"]) {
-      const ids = rows.filter((row) => row.type === type).map((row) => row.billId);
+      const group = rows.filter((row) => row.type === type);
+      const ids = group.map((row) => row.billId);
       if (!ids.length) continue;
       let result;
       try {
-        const response = await applyRepay(type, ids);
+        const response = route === "EPCC" ? await applyRepayWithRoute(type, group.map((row) => row.routeId)) : await applyRepay(type, ids);
         result = { type, ids, state: response.accepted ? "accepted" : "failed", message: response.accepted ? "\u7533\u8BF7\u5DF2\u53D7\u7406\uFF0C\u7B49\u5F85\u540E\u53F0\u5904\u7406" : `\u7533\u8BF7\u5931\u8D25\uFF1A${response.message}` };
       } catch (error) {
         result = { type, ids, state: "unknown", message: `\u7533\u8BF7\u7ED3\u679C\u5F85\u786E\u8BA4\uFF1A${error instanceof Error ? error.message : String(error)}\uFF1B\u8BF7\u5230\u540E\u53F0\u6838\u5BF9\uFF0C\u52FF\u91CD\u590D\u7533\u8BF7` };
       }
+      if (route === "EPCC") result.message = `\u6307\u5B9A\u7F51\u8054\uFF08EPCC\uFF09\uFF1A${result.message}`;
       results.push(result);
       onResult(result);
     }
@@ -4056,6 +4086,7 @@ ${row.node}`]) {
   <p id="repay-range" class="status"></p>
   <label class="repay-select-all"><input id="repay-all" type="checkbox" disabled>\u5168\u9009<span id="repay-count"></span></label>
   <div class="repay-table-wrap"><table class="repay-table"><thead><tr><th>\u7ED3\u7B97\u65B9\u5F0F</th><th>\u65F6\u95F4</th><th>\u5546\u6237\u53F7</th><th>\u5931\u8D25\u539F\u56E0</th></tr></thead><tbody id="repay-rows"></tbody></table></div>
+  <label for="repay-route">\u91CD\u51FA\u901A\u9053</label><select id="repay-route"><option value="AUTO">\u9ED8\u8BA4\u81EA\u52A8\u91CD\u51FA</option><option value="EPCC">\u6307\u5B9A\u7F51\u8054\uFF08EPCC\uFF09</option></select>
   <button id="repay-apply" type="button" class="primary" disabled>\u7533\u8BF7\u91CD\u51FA</button>
   <div id="repay-confirm" hidden><p id="repay-summary"></p><button id="repay-cancel" type="button">\u53D6\u6D88</button><button id="repay-submit" type="button" class="primary">\u786E\u8BA4\u7533\u8BF7</button></div>
   <div id="repay-status" class="status" role="status" aria-live="polite"></div>
@@ -4066,9 +4097,11 @@ ${row.node}`]) {
     let merchant = "";
     let busy = false;
     let confirming = false;
+    let route = "AUTO";
+    let confirmedRoute = "AUTO";
     const selected = /* @__PURE__ */ new Set();
     const outcomes = /* @__PURE__ */ new Map();
-    const eligible = (row) => row.selectable && !outcomes.has(repayKey(row));
+    const eligible = (row) => row.selectable && !outcomes.has(repayKey(row)) && (route !== "EPCC" || canRepayWithRoute(row));
     const status = (message, error = false) => {
       el("status").textContent = message;
       el("status").className = `status${error ? " error" : ""}`;
@@ -4078,6 +4111,7 @@ ${row.node}`]) {
       const available = rows.filter(eligible);
       el("merchant").disabled = busy || confirming;
       el("search").disabled = busy || confirming;
+      el("route").disabled = busy || confirming;
       const all = el("all");
       all.disabled = busy || confirming || !available.length;
       all.checked = !!available.length && selected.size === available.length;
@@ -4119,9 +4153,9 @@ ${row.node}`]) {
         const reason = document.createElement("td");
         reason.textContent = row.reason || "\u2014";
         const outcome = outcomes.get(repayKey(row));
-        if (outcome || !row.selectable) {
+        if (outcome || !row.selectable || route === "EPCC" && !canRepayWithRoute(row)) {
           const note = document.createElement("p");
-          note.textContent = outcome?.message || "\u540E\u53F0\u8BB0\u5F55\u4E0D\u53EF\u52FE\u9009";
+          note.textContent = outcome?.message || (!row.selectable ? "\u540E\u53F0\u8BB0\u5F55\u4E0D\u53EF\u52FE\u9009" : "\u7F3A\u5C11\u7F51\u8054\u91CD\u51FA\u6240\u9700\u7684\u5B8C\u6574\u8BB0\u5F55\u6807\u8BC6\uFF0C\u8BF7\u91CD\u65B0\u67E5\u8BE2");
           note.className = outcome?.state === "accepted" ? "repay-accepted" : "error";
           reason.append(note);
         }
@@ -4168,11 +4202,17 @@ ${row.node}`]) {
       if (el("all").checked) rows.filter(eligible).forEach((row) => selected.add(repayKey(row)));
       update();
     });
+    el("route").addEventListener("change", () => {
+      route = el("route").value;
+      for (const row of rows) if (!eligible(row)) selected.delete(repayKey(row));
+      render();
+    });
     el("apply").addEventListener("click", () => {
       if (busy || !selected.size) return;
       confirming = true;
+      confirmedRoute = route;
       const chosen = rows.filter((row) => selected.has(repayKey(row)));
-      el("summary").textContent = `\u786E\u8BA4\u5BF9\u5546\u6237 ${merchant} \u7684 ${chosen.length} \u7B14\u6253\u6B3E\u5355\u7533\u8BF7\u91CD\u51FA\uFF1FT0\uFF1A${chosen.filter((row) => row.type === "T0").length} \u7B14\uFF0CT1\uFF1A${chosen.filter((row) => row.type === "T1").length} \u7B14\u3002`;
+      el("summary").textContent = `\u786E\u8BA4\u5BF9\u5546\u6237 ${merchant} \u7684 ${chosen.length} \u7B14\u6253\u6B3E\u5355${confirmedRoute === "EPCC" ? "\u6307\u5B9A\u7F51\u8054\uFF08EPCC\uFF09" : "\u6309\u9ED8\u8BA4\u901A\u9053"}\u7533\u8BF7\u91CD\u51FA\uFF1FT0\uFF1A${chosen.filter((row) => row.type === "T0").length} \u7B14\uFF0CT1\uFF1A${chosen.filter((row) => row.type === "T1").length} \u7B14\u3002`;
       update();
     });
     el("cancel").addEventListener("click", () => {
@@ -4186,7 +4226,7 @@ ${row.node}`]) {
       const chosen = rows.filter((row) => selected.has(repayKey(row)) && eligible(row));
       busy = true;
       update();
-      status("\u6B63\u5728\u63D0\u4EA4\u91CD\u51FA\u7533\u8BF7...");
+      status(confirmedRoute === "EPCC" ? "\u6B63\u5728\u63D0\u4EA4\u6307\u5B9A\u7F51\u8054\uFF08EPCC\uFF09\u91CD\u51FA\u7533\u8BF7..." : "\u6B63\u5728\u63D0\u4EA4\u91CD\u51FA\u7533\u8BF7...");
       try {
         await submitSelectedRepay(chosen, merchant, (result) => {
           for (const id of result.ids) {
@@ -4196,7 +4236,7 @@ ${row.node}`]) {
           }
           log(`\u91CD\u51FA\u6253\u6B3E\u5355 ${result.type} ${result.ids.length} \u7B14\uFF1A${result.message}`, result.state !== "accepted");
           render();
-        });
+        }, confirmedRoute);
         const accepted = chosen.filter((row) => outcomes.get(repayKey(row))?.state === "accepted").length;
         status(`\u672C\u6B21 ${chosen.length} \u7B14\uFF0C\u5DF2\u53D7\u7406 ${accepted} \u7B14${accepted < chosen.length ? "\uFF1B\u5176\u4F59\u8BF7\u67E5\u770B\u8868\u683C\u63D0\u793A" : "\uFF0C\u7B49\u5F85\u540E\u53F0\u5904\u7406\uFF08\u4E0D\u4EE3\u8868\u6253\u6B3E\u5B8C\u6210\uFF09"}`, accepted < chosen.length);
       } catch (error) {

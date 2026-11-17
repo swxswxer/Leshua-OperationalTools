@@ -124,9 +124,9 @@ chrome-extension/src/
 
 在工具菜单选择“重出打款单”，输入单个 10 位商户号，同时查询 T0 和 T1；T0 不带时间参数，T1 的 `dateRange` 为当前本地年份 1 月 1 日至明天。时间列取后台“结算日期”。每类自动读取分页（每页 200 条，最多 100 页）；一类查询失败仍显示另一类结果并提示失败原因。
 
-表格支持单选、多选、全选；全选涵盖已加载且可勾选的记录。点击“申请重出”后确认商户及 T0/T1 笔数，再分别调用 `newT0Repay.do?method=applyAutoRepay`、`newT1Repay.do?method=applyAutoRepay`，`ids` 只传打款单号，以逗号分隔，不传复合 checkbox 值。只认可 `code="0000"`，支持后台双重 JSON 编码。受理成功不代表打款成功；超时或未知响应标记待确认，不自动重试。同一侧边栏会话内已受理或结果待确认的记录不可重复勾选，须到后台核对；明确失败后重新查询可再选。
+表格支持单选、多选、全选；全选涵盖已加载且可勾选的记录。1.0.30 新增“重出通道”，默认自动重出，也可选择“指定网联（EPCC）”；确认页展示商户、通道及 T0/T1 笔数。默认模式分别调用 `newT0Repay.do?method=applyAutoRepay`、`newT1Repay.do?method=applyAutoRepay`，`ids` 只传打款单号。指定网联模式调用各自的 `applyAutoRepayWithRoute`，额外传 `channelId=EPCC`，`ids` 使用原勾选框完整值：T0 为 `打款单号_商户号_标志_记录ID`，T1 为 `打款单号_商户号_记录ID`，多条以英文逗号分隔。缺少或不匹配的完整标识不可用于网联模式。只认可 `code="0000"`，支持后台双重 JSON 编码。受理成功不代表打款成功；超时或未知响应标记待确认，不自动重试。两种通道共用同一侧边栏会话内的防重复状态，已受理或结果待确认的记录不可再次勾选；明确失败后重新查询可再选。
 
-模块为 `api/repay.ts`、`tools/repay.ts`、`sidepanel/repay.ts`，测试为 `tests/repay.test.ts`。联调测试使用模拟请求，禁止自动执行真实打款申请。
+模块为 `api/repay.ts`、`tools/repay.ts`、`sidepanel/repay.ts`，测试为 `tests/repay.test.ts`、`tests/repay-route-api.test.ts`。联调测试使用模拟请求，禁止自动执行真实打款申请。
 
 ### 风险工单查询流程
 

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { applyRepay, queryRepayPage, repayDateRange, repayQueryBody, parseRepayPage, parseRepayResponse, type RepayRow } from '../src/api/repay';
+import { applyRepay, applyRepayWithRoute, queryRepayPage, repayDateRange, repayQueryBody, parseRepayPage, parseRepayResponse, type RepayRow } from '../src/api/repay';
 import { searchRepay, submitSelectedRepay } from '../src/tools/repay';
-vi.mock('../src/api/repay', async original => ({ ...await original<typeof import('../src/api/repay')>(), applyRepay: vi.fn(), queryRepayPage: vi.fn() }));
+vi.mock('../src/api/repay', async original => ({ ...await original<typeof import('../src/api/repay')>(), applyRepay: vi.fn(), applyRepayWithRoute: vi.fn(), queryRepayPage: vi.fn() }));
 beforeEach(() => vi.resetAllMocks());
 afterEach(() => vi.unstubAllGlobals());
 function stubEmptyTable(body: string, hasCheckbox = false) {
@@ -65,4 +65,42 @@ it('所选记录按 T0/T1 路由提交，单组失败不阻断另一组', async 
 it('不提交重复、跨商户、不可选和空记录', async () => {
   for (const rows of [[],[row('T0'),row('T0')],[{...row('T0'),merchantId:'9999999999'}],[{...row('T0'),selectable:false}]]) await expect(submitSelectedRepay(rows,'0012345678')).rejects.toThrow();
   expect(applyRepay).not.toHaveBeenCalled();
+});
+
+it('指定网联按 T0/T1 分组发送完整复合标识，回调仍以打款单号锁定记录', async () => {
+  vi.mocked(applyRepayWithRoute).mockResolvedValue({ accepted: true, message: '成功' });
+  const values = [
+    { ...row('T0'), routeId: '000123_0012345678_1_1353419' },
+    { ...row('T1', '000456'), routeId: '000456_0012345678_4695761' },
+  ];
+  const update = vi.fn();
+  const results = await submitSelectedRepay(values, '0012345678', update, 'EPCC');
+  expect(applyRepayWithRoute).toHaveBeenNthCalledWith(1, 'T0', ['000123_0012345678_1_1353419']);
+  expect(applyRepayWithRoute).toHaveBeenNthCalledWith(2, 'T1', ['000456_0012345678_4695761']);
+  expect(applyRepay).not.toHaveBeenCalled();
+  expect(results.map(result => result.ids)).toEqual([['000123'], ['000456']]);
+  expect(results.every(result => result.state === 'accepted' && result.message.includes('EPCC'))).toBe(true);
+  expect(update).toHaveBeenCalledTimes(2);
+});
+
+it('指定网联标识缺失或与记录不一致时不提交，也不退回普通重出', async () => {
+  for (const value of [row('T0'),
+    { ...row('T0'), routeId: '000123_9999999999_1_1353419' },
+    { ...row('T1'), routeId: '999999_0012345678_4695761' },
+  ]) {
+    await expect(submitSelectedRepay([value], '0012345678', vi.fn(), 'EPCC')).rejects.toThrow('完整标识');
+  }
+  expect(applyRepayWithRoute).not.toHaveBeenCalled();
+  expect(applyRepay).not.toHaveBeenCalled();
+});
+
+it('指定网联的失败或待确认状态不会阻断另一结算方式', async () => {
+  vi.mocked(applyRepayWithRoute).mockRejectedValueOnce(new Error('请求超时')).mockResolvedValueOnce({ accepted: false, message: '该记录不允许重打' });
+  const results = await submitSelectedRepay([
+    { ...row('T0'), routeId: '000123_0012345678_1_1353419' },
+    { ...row('T1'), routeId: '000123_0012345678_4695761' },
+  ], '0012345678', vi.fn(), 'EPCC');
+  expect(results.map(result => result.state)).toEqual(['unknown', 'failed']);
+  expect(results[1].message).toContain('该记录不允许重打');
+  expect(applyRepayWithRoute).toHaveBeenCalledTimes(2);
 });

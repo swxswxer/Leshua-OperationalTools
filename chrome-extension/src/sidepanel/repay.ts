@@ -1,5 +1,5 @@
-import { repayDateRange, type RepayRow } from '../api/repay';
-import { repayKey, searchRepay, submitSelectedRepay } from '../tools/repay';
+import { repayDateRange, type RepayRoute, type RepayRow } from '../api/repay';
+import { canRepayWithRoute, repayKey, searchRepay, submitSelectedRepay } from '../tools/repay';
 import type { LogHandler } from '../types';
 
 export const repayView = `<section id="syt-view-repay" class="view">
@@ -7,6 +7,7 @@ export const repayView = `<section id="syt-view-repay" class="view">
   <p id="repay-range" class="status"></p>
   <label class="repay-select-all"><input id="repay-all" type="checkbox" disabled>全选<span id="repay-count"></span></label>
   <div class="repay-table-wrap"><table class="repay-table"><thead><tr><th>结算方式</th><th>时间</th><th>商户号</th><th>失败原因</th></tr></thead><tbody id="repay-rows"></tbody></table></div>
+  <label for="repay-route">重出通道</label><select id="repay-route"><option value="AUTO">默认自动重出</option><option value="EPCC">指定网联（EPCC）</option></select>
   <button id="repay-apply" type="button" class="primary" disabled>申请重出</button>
   <div id="repay-confirm" hidden><p id="repay-summary"></p><button id="repay-cancel" type="button">取消</button><button id="repay-submit" type="button" class="primary">确认申请</button></div>
   <div id="repay-status" class="status" role="status" aria-live="polite"></div>
@@ -18,9 +19,11 @@ export function initializeRepay(root: HTMLElement, log: LogHandler): void {
   let merchant = '';
   let busy = false;
   let confirming = false;
+  let route: RepayRoute = 'AUTO';
+  let confirmedRoute: RepayRoute = 'AUTO';
   const selected = new Set<string>();
   const outcomes = new Map<string, { state: string; message: string }>();
-  const eligible = (row: RepayRow) => row.selectable && !outcomes.has(repayKey(row));
+  const eligible = (row: RepayRow) => row.selectable && !outcomes.has(repayKey(row)) && (route !== 'EPCC' || canRepayWithRoute(row));
   const status = (message: string, error = false) => {
     el('status').textContent = message; el('status').className = `status${error ? ' error' : ''}`; log(`重出打款单：${message}`, error);
   };
@@ -28,6 +31,7 @@ export function initializeRepay(root: HTMLElement, log: LogHandler): void {
     const available = rows.filter(eligible);
     el<HTMLInputElement>('merchant').disabled = busy || confirming;
     el<HTMLButtonElement>('search').disabled = busy || confirming;
+    el<HTMLSelectElement>('route').disabled = busy || confirming;
     const all = el<HTMLInputElement>('all'); all.disabled = busy || confirming || !available.length;
     all.checked = !!available.length && selected.size === available.length; all.indeterminate = selected.size > 0 && selected.size < available.length;
     el('count').textContent = `已选 ${selected.size} / ${available.length} 笔`;
@@ -50,8 +54,8 @@ export function initializeRepay(root: HTMLElement, log: LogHandler): void {
       for (const text of [row.date, row.merchantId]) { const cell = document.createElement('td'); cell.textContent = text; tr.append(cell); }
       const reason = document.createElement('td'); reason.textContent = row.reason || '—';
       const outcome = outcomes.get(repayKey(row));
-      if (outcome || !row.selectable) {
-        const note = document.createElement('p'); note.textContent = outcome?.message || '后台记录不可勾选'; note.className = outcome?.state === 'accepted' ? 'repay-accepted' : 'error'; reason.append(note);
+      if (outcome || !row.selectable || (route === 'EPCC' && !canRepayWithRoute(row))) {
+        const note = document.createElement('p'); note.textContent = outcome?.message || (!row.selectable ? '后台记录不可勾选' : '缺少网联重出所需的完整记录标识，请重新查询'); note.className = outcome?.state === 'accepted' ? 'repay-accepted' : 'error'; reason.append(note);
       }
       tr.title = `打款单号：${row.billId}`; tr.append(reason); el('rows').append(tr);
     }
@@ -72,23 +76,29 @@ export function initializeRepay(root: HTMLElement, log: LogHandler): void {
     finally { busy = false; render(); }
   });
   el('all').addEventListener('change', () => { selected.clear(); if (el<HTMLInputElement>('all').checked) rows.filter(eligible).forEach(row => selected.add(repayKey(row))); update(); });
+  el('route').addEventListener('change', () => {
+    route = el<HTMLSelectElement>('route').value as RepayRoute;
+    for (const row of rows) if (!eligible(row)) selected.delete(repayKey(row));
+    render();
+  });
   el('apply').addEventListener('click', () => {
     if (busy || !selected.size) return;
     confirming = true;
+    confirmedRoute = route;
     const chosen = rows.filter(row => selected.has(repayKey(row)));
-    el('summary').textContent = `确认对商户 ${merchant} 的 ${chosen.length} 笔打款单申请重出？T0：${chosen.filter(row => row.type === 'T0').length} 笔，T1：${chosen.filter(row => row.type === 'T1').length} 笔。`;
+    el('summary').textContent = `确认对商户 ${merchant} 的 ${chosen.length} 笔打款单${confirmedRoute === 'EPCC' ? '指定网联（EPCC）' : '按默认通道'}申请重出？T0：${chosen.filter(row => row.type === 'T0').length} 笔，T1：${chosen.filter(row => row.type === 'T1').length} 笔。`;
     update();
   });
   el('cancel').addEventListener('click', () => { if (!busy) { confirming = false; update(); } });
   el('submit').addEventListener('click', async () => {
     if (busy || !confirming) return;
     const chosen = rows.filter(row => selected.has(repayKey(row)) && eligible(row));
-    busy = true; update(); status('正在提交重出申请...');
+    busy = true; update(); status(confirmedRoute === 'EPCC' ? '正在提交指定网联（EPCC）重出申请...' : '正在提交重出申请...');
     try {
       await submitSelectedRepay(chosen, merchant, result => {
         for (const id of result.ids) { const key = `${result.type}:${id}`; outcomes.set(key, { state: result.state, message: result.message }); selected.delete(key); }
         log(`重出打款单 ${result.type} ${result.ids.length} 笔：${result.message}`, result.state !== 'accepted'); render();
-      });
+      }, confirmedRoute);
       const accepted = chosen.filter(row => outcomes.get(repayKey(row))?.state === 'accepted').length;
       status(`本次 ${chosen.length} 笔，已受理 ${accepted} 笔${accepted < chosen.length ? '；其余请查看表格提示' : '，等待后台处理（不代表打款完成）'}`, accepted < chosen.length);
     } catch (error) { status(error instanceof Error ? error.message : String(error), true); }
