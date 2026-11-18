@@ -55,6 +55,13 @@ const PRESETS = [
     subAppids: 'wx76a4c0a8a9ef465b',
     jsapiPaths: '',
   },
+  {
+    name: '明献',
+    channelId: '635928618',
+    channelName: '上海明献信息科技有限公司',
+    subAppids: 'wx2f098ddb82316122',
+    jsapiPaths: '',
+  },
 ];
 
 function byId<T extends HTMLElement>(root: ParentNode, id: string): T {

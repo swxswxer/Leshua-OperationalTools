@@ -4671,6 +4671,13 @@ ${row.node}`]) {
       channelName: "\u6DF1\u5733\u5BCC\u4E91\u6570\u79D1\u4FE1\u606F\u6280\u672F\u6709\u9650\u516C\u53F8",
       subAppids: "wx76a4c0a8a9ef465b",
       jsapiPaths: ""
+    },
+    {
+      name: "\u660E\u732E",
+      channelId: "635928618",
+      channelName: "\u4E0A\u6D77\u660E\u732E\u4FE1\u606F\u79D1\u6280\u6709\u9650\u516C\u53F8",
+      subAppids: "wx2f098ddb82316122",
+      jsapiPaths: ""
     }
   ];
   function byId(root, id) {
