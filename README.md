@@ -22,6 +22,8 @@ Edge 商店上传包使用 `npm run package:edge` 生成 `leshua-operations-edge
 
 ## 功能
 
+- 权限工单审核（1.0.31）：独立页面按完整 QX 申请单号查询，展示申请单号、状态、当前环节和提交时间；后台列表返回可审批入口的记录才提供可用的“审核通过”按钮。点击后重新查询列表与详情，按 `data.apply` 和 `data.steps` 获取唯一的当前待审批 `stepId`，存量无步骤实例单使用 `null`，以 JSON `{applyNo, stepId, pass:true, comment:""}` 提交 `permissionApply.do?method=audit`。仅认可 `respCode=0`，成功后刷新列表；每次只审核当前一个环节，不自动连审。已提交或结果待确认的同一环节不重复发送，请求异常需核实后台。模块位于 `api/permission-review.ts`、`tools/permission-review.ts`、`sidepanel/permission-review.ts`，不复用风险工单的审核接口或锁。
+
 - 网页右键重置（1.0.25）：在任意网页选中一个或多个 10 位乐刷商户号，右键进入“乐刷运营工具”，选择收银通/联合收单的微信、支付宝或全部重置，共六项。自动打开当前浏览器窗口的侧边栏，填入商户号、业务线和通道并执行，结果展示和自动复制沿用原重置流程。选中文字沿用主输入框的分隔、格式和重复校验；渠道、微信支付参数和是否禁用旧号沿用当前侧边栏配置，新打开的侧边栏采用默认值。有任务执行中时本次菜单操作会提示未执行，不改写当前任务。需已登录运营后台。
 - 右键菜单需要 `contextMenus` 权限；`storage` 仅用于会话内暂存尚未交付的菜单操作，按浏览器窗口隔离，领取后删除，超过 60 秒的未领取请求丢弃，不会在重开侧边栏时重复执行。菜单适用于浏览器提供文字选中右键菜单的页面，页面自行拦截右键时仍受页面行为影响。Chrome/Edge 从右键菜单打开侧边栏的官方用法见 [Edge 侧边栏说明](https://learn.microsoft.com/en-us/microsoft-edge/extensions/developer-guide/sidebar#opening-the-sidebar-upon-user-interaction)。
 

@@ -3692,6 +3692,228 @@ ${row.node}`]) {
     } };
   }
 
+  // src/api/permission-review.ts
+  var ENDPOINT3 = `${SAAS}/permissionApply.do`;
+  var FORM_HEADERS3 = { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" };
+  var STATUS_CODES = /* @__PURE__ */ new Map([["\u8349\u7A3F", 0], ["\u5BA1\u6279\u4E2D", 10], ["\u5DF2\u9A73\u56DE", 20], ["\u5F85\u98CE\u63A7\u590D\u5BA1\uFF08\u5B58\u91CF\uFF09", 30], ["\u5DF2\u5F00\u901A", 60], ["\u5DF2\u64A4\u9500", 70]]);
+  function normalizePermissionApplyNo(raw) {
+    const applyNo = raw.trim();
+    if (!/^QX\d+$/.test(applyNo)) throw new Error("\u8BF7\u8F93\u5165 QX \u5F00\u5934\u7684\u5B8C\u6574\u6743\u9650\u7533\u8BF7\u5355\u53F7");
+    return applyNo;
+  }
+  function parsePermissionApplications(html, applyNo) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    doc.querySelectorAll("script, style").forEach((node) => node.remove());
+    if (doc.querySelector('input[type="password"]') || /登录|login/i.test(doc.title)) throw new Error("\u767B\u5F55\u5DF2\u5931\u6548\uFF0C\u8BF7\u5148\u767B\u5F55\u8FD0\u8425\u540E\u53F0");
+    if (/没有该项操作权限|权限不足|无权访问/.test(doc.body.textContent || "")) throw new Error("\u5F53\u524D\u8D26\u53F7\u6CA1\u6709\u6743\u9650\u5DE5\u5355\u67E5\u8BE2\u6216\u5BA1\u6838\u6743\u9650");
+    const required = ["\u7533\u8BF7\u5355\u53F7", "\u72B6\u6001", "\u5F53\u524D\u73AF\u8282", "\u63D0\u4EA4\u65F6\u95F4"];
+    const table = Array.from(doc.querySelectorAll("table")).find((item) => {
+      const names = Array.from(item.querySelectorAll("thead th")).map((th) => normalizeText(th.textContent));
+      return required.every((name) => names.includes(name));
+    });
+    if (!table) throw new Error("\u672A\u8BC6\u522B\u5230\u6743\u9650\u7533\u8BF7\u5217\u8868\uFF0C\u8BF7\u5230\u540E\u53F0\u6838\u5BF9");
+    const headers2 = Array.from(table.querySelectorAll("thead th")).map((th) => normalizeText(th.textContent));
+    const rows = [];
+    for (const tr of Array.from(table.querySelectorAll("tbody > tr"))) {
+      const cells = Array.from(tr.children);
+      const value = (name) => normalizeText(cells[headers2.indexOf(name)]?.textContent);
+      const number = value("\u7533\u8BF7\u5355\u53F7");
+      if (!/^QX\d+$/.test(number)) continue;
+      if (number !== applyNo) throw new Error("\u540E\u53F0\u8FD4\u56DE\u4E86\u4E0D\u5339\u914D\u7684\u7533\u8BF7\u5355\uFF0C\u8BF7\u6838\u5BF9\u67E5\u8BE2\u6761\u4EF6");
+      const status = value("\u72B6\u6001");
+      const statusCode = STATUS_CODES.get(status) ?? null;
+      const operation = cells[headers2.indexOf("\u64CD\u4F5C")];
+      const canApprove = Array.from(operation?.querySelectorAll("a[onclick]") || []).some((link) => {
+        if (link.style.display === "none" || link.closest("[hidden]")) return false;
+        const match = (link.getAttribute("onclick") || "").match(/^\s*openAudit\(\s*(['"])(QX\d+)\1\s*,\s*(10|30)\s*\)\s*;?\s*$/);
+        return !!match && match[2] === number && Number(match[3]) === statusCode;
+      });
+      rows.push({ applyNo: number, status, statusCode, currentStep: value("\u5F53\u524D\u73AF\u8282"), submittedAt: value("\u63D0\u4EA4\u65F6\u95F4"), round: value("\u8F6E\u6B21"), canApprove });
+    }
+    if (rows.length > 1) throw new Error("\u540C\u4E00\u7533\u8BF7\u5355\u8FD4\u56DE\u4E86\u591A\u6761\u8BB0\u5F55\uFF0C\u8BF7\u5230\u540E\u53F0\u6838\u5BF9");
+    return rows;
+  }
+  async function queryPermissionApplications(raw) {
+    const applyNo = normalizePermissionApplyNo(raw);
+    const html = await requestText(`${ENDPOINT3}?method=list`, {
+      method: "POST",
+      headers: FORM_HEADERS3,
+      timeoutMs: 15e3,
+      body: buildFormBody({ applyNo, agentNo: "", applyType: "", status: "", curStepCode: "", agentClass: "", pageSize: 20 })
+    });
+    return parsePermissionApplications(html, applyNo);
+  }
+  function parsePermissionApprovalTask(response, row) {
+    if (String(response?.respCode) !== "0") throw new Error(response?.respMsg || "\u6743\u9650\u5DE5\u5355\u8BE6\u60C5\u67E5\u8BE2\u5931\u8D25");
+    const apply = response.data?.apply;
+    if (!apply || apply.applyNo !== row.applyNo || ![10, 30].includes(Number(apply.status)) || Number(apply.status) !== row.statusCode) {
+      throw new Error("\u7533\u8BF7\u5355\u5DF2\u53D8\u66F4\u6216\u4E0D\u5904\u4E8E\u5BA1\u6279\u4E2D\uFF0C\u8BF7\u91CD\u65B0\u67E5\u8BE2");
+    }
+    const round = normalizeText(apply.round || 1);
+    if (row.round && round !== row.round) throw new Error("\u7533\u8BF7\u5355\u8F6E\u6B21\u5DF2\u53D8\u66F4\uFF0C\u8BF7\u91CD\u65B0\u67E5\u8BE2");
+    const stepName = normalizeText(apply.curStepName);
+    if (stepName && stepName !== row.currentStep) throw new Error("\u5F53\u524D\u5BA1\u6279\u73AF\u8282\u5DF2\u53D8\u66F4\uFF0C\u8BF7\u91CD\u65B0\u67E5\u8BE2");
+    const steps = response.data?.steps;
+    if (steps != null && !Array.isArray(steps)) throw new Error("\u8BE6\u60C5\u672A\u8FD4\u56DE\u6709\u6548\u7684\u5BA1\u6279\u73AF\u8282\u4FE1\u606F");
+    let stepId = null;
+    if (steps?.length) {
+      const current = steps.filter((step) => String(step.status) === "0" && normalizeText(step.stepName) === stepName);
+      if (!stepName || current.length !== 1 || !/^\d+$/.test(String(current[0].id))) throw new Error("\u65E0\u6CD5\u786E\u5B9A\u552F\u4E00\u7684\u5F53\u524D\u5BA1\u6279\u73AF\u8282\uFF0C\u8BF7\u5230\u540E\u53F0\u6838\u5BF9");
+      stepId = Number(current[0].id);
+      if (!Number.isSafeInteger(stepId) || stepId <= 0) throw new Error("\u5F53\u524D\u5BA1\u6279\u73AF\u8282 ID \u65E0\u6548\uFF0C\u8BF7\u5230\u540E\u53F0\u6838\u5BF9");
+    }
+    return { applyNo: row.applyNo, stepId, statusCode: Number(apply.status), stepName: stepName || row.currentStep, round };
+  }
+  async function getPermissionApprovalTask(row) {
+    const response = await requestJson(`${ENDPOINT3}?method=detail&${buildFormBody({ applyNo: normalizePermissionApplyNo(row.applyNo) })}`, { timeoutMs: 15e3 });
+    return parsePermissionApprovalTask(response, row);
+  }
+  async function submitPermissionApproval(task) {
+    normalizePermissionApplyNo(task.applyNo);
+    if (task.stepId !== null && (!Number.isSafeInteger(task.stepId) || task.stepId <= 0)) throw new Error("\u65E0\u6548\u7684\u5BA1\u6279\u73AF\u8282 ID");
+    const response = await requestJson(`${ENDPOINT3}?method=audit`, {
+      method: "POST",
+      timeoutMs: 2e4,
+      headers: { "Content-Type": "application/json;charset=UTF-8" },
+      body: JSON.stringify({ applyNo: task.applyNo, stepId: task.stepId, pass: true, comment: "" })
+    });
+    if (response?.respCode == null) throw new Error("\u540E\u53F0\u672A\u8FD4\u56DE\u5BA1\u6279\u7ED3\u679C\u7801");
+    return { accepted: String(response.respCode) === "0", message: response.respMsg || "\u540E\u53F0\u672A\u63D0\u4F9B\u5BA1\u6279\u8BF4\u660E" };
+  }
+
+  // src/tools/permission-review.ts
+  var permissionRowKey = (row) => `${row.applyNo}|${row.round}|${row.statusCode}|${row.currentStep}`;
+  var PermissionReview = class {
+    busy = false;
+    attempted = /* @__PURE__ */ new Set();
+    async approve(row) {
+      if (this.busy) throw new Error("\u6B63\u5728\u5904\u7406\u6743\u9650\u5DE5\u5355\uFF0C\u8BF7\u7A0D\u5019");
+      if (!row.canApprove || ![10, 30].includes(row.statusCode ?? -1)) throw new Error("\u5F53\u524D\u7533\u8BF7\u5355\u4E0D\u53EF\u5BA1\u6838\u6216\u6CA1\u6709\u5BA1\u6838\u6743\u9650");
+      this.busy = true;
+      try {
+        const latest = (await queryPermissionApplications(row.applyNo)).find((item) => item.applyNo === row.applyNo);
+        if (!latest?.canApprove || permissionRowKey(latest) !== permissionRowKey(row)) throw new Error("\u7533\u8BF7\u5355\u72B6\u6001\u3001\u73AF\u8282\u6216\u8F6E\u6B21\u5DF2\u53D8\u66F4\uFF0C\u8BF7\u91CD\u65B0\u67E5\u8BE2");
+        const task = await getPermissionApprovalTask(latest);
+        const key = task.stepId == null ? `${permissionRowKey(latest)}|legacy` : `${task.applyNo}|${task.stepId}`;
+        if (this.attempted.has(key)) throw new Error("\u672C\u73AF\u8282\u5DF2\u63D0\u4EA4\u6216\u7ED3\u679C\u5F85\u786E\u8BA4\uFF0C\u8BF7\u67E5\u8BE2\u6216\u5230\u540E\u53F0\u6838\u5B9E\uFF0C\u52FF\u91CD\u590D\u5BA1\u6838");
+        this.attempted.add(key);
+        try {
+          const response = await submitPermissionApproval(task);
+          if (!response.accepted) {
+            this.attempted.delete(key);
+            return { state: "failed", message: `\u5BA1\u6279\u5931\u8D25\uFF1A${response.message}` };
+          }
+          return { state: "success", message: response.message };
+        } catch (error) {
+          return { state: "unknown", message: `\u5BA1\u6279\u7ED3\u679C\u5F85\u786E\u8BA4\uFF1A${error instanceof Error ? error.message : String(error)}\uFF1B\u8BF7\u5230\u540E\u53F0\u6838\u5B9E\uFF0C\u52FF\u91CD\u590D\u5BA1\u6838` };
+        }
+      } finally {
+        this.busy = false;
+      }
+    }
+  };
+
+  // src/sidepanel/permission-review.ts
+  var permissionReviewView = `<section id="syt-view-permission-review" class="view">
+  <form id="permission-form"><label for="permission-query">\u6743\u9650\u5DE5\u5355\u53F7</label><input id="permission-query" autocomplete="off" placeholder="QX \u5F00\u5934\u7684\u7533\u8BF7\u5355\u53F7" required><button id="permission-search" class="primary" type="submit">\u67E5\u8BE2\u6743\u9650\u5DE5\u5355</button></form>
+  <div class="permission-table-wrap"><table class="permission-table"><thead><tr><th>\u7533\u8BF7\u5355\u53F7</th><th>\u72B6\u6001</th><th>\u5F53\u524D\u73AF\u8282</th><th>\u63D0\u4EA4\u65F6\u95F4</th><th>\u64CD\u4F5C</th></tr></thead><tbody id="permission-rows"></tbody></table></div>
+  <div id="permission-status" class="status" role="status" aria-live="polite"></div>
+</section>`;
+  function initializePermissionReview(root, log) {
+    const el = (id) => root.querySelector(`#permission-${id}`);
+    const review = new PermissionReview();
+    const outcomes = /* @__PURE__ */ new Map();
+    let rows = [];
+    let busy = false;
+    let query = "";
+    const status = (message, error = false) => {
+      el("status").textContent = message;
+      el("status").className = `status${error ? " error" : ""}`;
+      log(`\u6743\u9650\u5DE5\u5355\uFF1A${message}`, error);
+    };
+    const render = () => {
+      el("query").disabled = busy;
+      el("search").disabled = busy;
+      el("rows").replaceChildren();
+      if (!rows.length && query && !busy) {
+        const cell = document.createElement("td");
+        cell.colSpan = 5;
+        cell.textContent = "\u672A\u67E5\u8BE2\u5230\u6743\u9650\u5DE5\u5355";
+        const tr = document.createElement("tr");
+        tr.append(cell);
+        el("rows").append(tr);
+      }
+      for (const row of rows) {
+        const tr = document.createElement("tr");
+        for (const text of [row.applyNo, row.status, row.currentStep, row.submittedAt]) {
+          const td2 = document.createElement("td");
+          td2.textContent = text || "-";
+          tr.append(td2);
+        }
+        const action = document.createElement("td");
+        const outcome = outcomes.get(permissionRowKey(row));
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = outcome?.state === "success" ? "\u5DF2\u901A\u8FC7" : outcome?.state === "unknown" ? "\u5F85\u786E\u8BA4" : "\u5BA1\u6838\u901A\u8FC7";
+        button.disabled = busy || !row.canApprove || outcome?.state === "success" || outcome?.state === "unknown";
+        if (!row.canApprove) button.title = "\u8BE5\u5355\u5F53\u524D\u4E0D\u53EF\u5BA1\u6838\u6216\u8D26\u53F7\u6CA1\u6709\u5BA1\u6838\u6743\u9650";
+        button.addEventListener("click", () => void run(async () => {
+          status(`\u6B63\u5728\u6838\u5BF9 ${row.applyNo} \u7684\u5F53\u524D\u5BA1\u6279\u73AF\u8282...`);
+          const result = await review.approve(row);
+          outcomes.set(permissionRowKey(row), result);
+          status(`${row.applyNo}\uFF1A${result.message}`, result.state !== "success");
+          if (result.state === "success") {
+            try {
+              rows = await queryPermissionApplications(query);
+            } catch (error) {
+              status(`${row.applyNo} \u5BA1\u6279\u5DF2\u901A\u8FC7\uFF1B\u5217\u8868\u5237\u65B0\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`, true);
+            }
+          }
+        }));
+        action.append(button);
+        if (outcome) {
+          const note = document.createElement("p");
+          note.textContent = outcome.message;
+          note.className = outcome.state === "success" ? "success" : "error";
+          action.append(note);
+        }
+        tr.append(action);
+        el("rows").append(tr);
+      }
+    };
+    const run = async (action) => {
+      if (busy) return;
+      busy = true;
+      render();
+      try {
+        await action();
+      } catch (error) {
+        status(error instanceof Error ? error.message : String(error), true);
+      } finally {
+        busy = false;
+        render();
+      }
+    };
+    el("query").addEventListener("input", () => {
+      rows = [];
+      query = "";
+      el("status").textContent = "";
+      render();
+    });
+    el("form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      void run(async () => {
+        rows = [];
+        query = "";
+        const number = normalizePermissionApplyNo(el("query").value);
+        status("\u6B63\u5728\u67E5\u8BE2\u6743\u9650\u5DE5\u5355...");
+        rows = await queryPermissionApplications(number);
+        query = number;
+        status(rows.length ? `\u67E5\u8BE2\u5230 ${rows.length} \u6761\u6743\u9650\u5DE5\u5355` : "\u672A\u67E5\u8BE2\u5230\u6743\u9650\u5DE5\u5355");
+      });
+    });
+  }
+
   // src/api/risk-merchant-tickets.ts
   function parseRiskHandlingLink(html, ticketNumber, merchantId) {
     const doc = new DOMParser().parseFromString(html, "text/html");
@@ -4250,7 +4472,7 @@ ${row.node}`]) {
   }
 
   // src/api/device-transfer.ts
-  var ENDPOINT3 = "/base-business/pinpad/newTerminal.do";
+  var ENDPOINT4 = "/base-business/pinpad/newTerminal.do";
   var LHSD_TRANSFER_ENDPOINT = "/uts_platform/machine/manager/machineChangeAgent.do";
   function trim(value) {
     return value.trim();
@@ -4261,7 +4483,7 @@ ${row.node}`]) {
   }
   async function request(method, values, fetchImpl) {
     const body = new URLSearchParams(values);
-    const url = `${ORIGIN}${ENDPOINT3}?method=${encodeURIComponent(method)}`;
+    const url = `${ORIGIN}${ENDPOINT4}?method=${encodeURIComponent(method)}`;
     if (!fetchImpl) {
       const payload = await requestJson(url, {
         method: "POST",
@@ -4485,6 +4707,7 @@ ${row.node}`]) {
         </section>
         ${snAuthorizationView}
         ${ticketReviewView}
+        ${permissionReviewView}
         ${riskMerchantTicketsView}
         ${repayView}
         <section id="syt-view-cups" class="view">
@@ -4515,6 +4738,7 @@ ${row.node}`]) {
     toolSelect.add(new Option("CUPS \u4E0A\u62A5", "cups"));
     toolSelect.add(new Option("SN \u6388\u6743\u7801\u4E0B\u53D1", "sn-authorization"));
     toolSelect.add(new Option("\u5DE5\u5355\u5BA1\u6838", "ticket-review"));
+    toolSelect.add(new Option("\u6743\u9650\u5DE5\u5355\u5BA1\u6838", "permission-review"));
     toolSelect.add(new Option("\u98CE\u9669\u5546\u6237\u5DE5\u5355\u67E5\u8BE2", "risk-tickets"));
     toolSelect.add(new Option("\u91CD\u51FA\u6253\u6B3E\u5355", "repay"));
     const clearMerchant = byId(root, "syt-clear-merchant");
@@ -4602,6 +4826,7 @@ ${row.node}`]) {
       }
     };
     const ticketReview = initializeTicketReview(root, log);
+    initializePermissionReview(root, log);
     initializeRiskMerchantTickets(root, log);
     initializeRepay(root, log);
     const showView = async (name) => {
@@ -4611,7 +4836,7 @@ ${row.node}`]) {
       }
       root.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === `syt-view-${name}`));
       backButton.classList.toggle("visible", name !== "reset");
-      title.textContent = name === "reset" ? "\u5B50\u5546\u6237\u53F7\u91CD\u7F6E" : { repay: "\u91CD\u51FA\u6253\u6B3E\u5355", "risk-tickets": "\u98CE\u9669\u5546\u6237\u5DE5\u5355\u67E5\u8BE2", "ticket-review": "\u5DE5\u5355\u5BA1\u6838", "sn-authorization": "SN \u6388\u6743\u7801\u4E0B\u53D1", cups: "CUPS \u4E0A\u62A5", code: "\u7801\u724C\u5212\u8F6C", device: "\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8", "lhsd-device": "\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8", "bind-config": "\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name];
+      title.textContent = name === "reset" ? "\u5B50\u5546\u6237\u53F7\u91CD\u7F6E" : { repay: "\u91CD\u51FA\u6253\u6B3E\u5355", "permission-review": "\u6743\u9650\u5DE5\u5355\u5BA1\u6838", "risk-tickets": "\u98CE\u9669\u5546\u6237\u5DE5\u5355\u67E5\u8BE2", "ticket-review": "\u5DE5\u5355\u5BA1\u6838", "sn-authorization": "SN \u6388\u6743\u7801\u4E0B\u53D1", cups: "CUPS \u4E0A\u62A5", code: "\u7801\u724C\u5212\u8F6C", device: "\u6536\u94F6\u901A\u673A\u5177\u5212\u62E8", "lhsd-device": "\u8054\u5408\u6536\u5355\u673A\u5177\u5212\u62E8", "bind-config": "\u8BBE\u5907\u6362\u7ED1\u914D\u7F6E", whitelist: "\u9632\u5207\u6237\u767D\u540D\u5355" }[name];
       toolSelect.value = "";
       return true;
     };
