@@ -3816,7 +3816,7 @@ ${row.node}`]) {
   // src/sidepanel/permission-review.ts
   var permissionReviewView = `<section id="syt-view-permission-review" class="view">
   <form id="permission-form"><label for="permission-query">\u6743\u9650\u5DE5\u5355\u53F7</label><input id="permission-query" autocomplete="off" placeholder="QX \u5F00\u5934\u7684\u7533\u8BF7\u5355\u53F7" required><button id="permission-search" class="primary" type="submit">\u67E5\u8BE2\u6743\u9650\u5DE5\u5355</button></form>
-  <div class="permission-table-wrap"><table class="permission-table"><thead><tr><th>\u7533\u8BF7\u5355\u53F7</th><th>\u72B6\u6001</th><th>\u5F53\u524D\u73AF\u8282</th><th>\u63D0\u4EA4\u65F6\u95F4</th><th>\u64CD\u4F5C</th></tr></thead><tbody id="permission-rows"></tbody></table></div>
+  <div class="permission-table-wrap"><table class="permission-table"><thead><tr><th>\u7533\u8BF7\u5355\u53F7</th><th>\u5F53\u524D\u73AF\u8282</th><th>\u64CD\u4F5C</th></tr></thead><tbody id="permission-rows"></tbody></table></div>
   <div id="permission-status" class="status" role="status" aria-live="polite"></div>
 </section>`;
   function initializePermissionReview(root, log) {
@@ -3837,7 +3837,7 @@ ${row.node}`]) {
       el("rows").replaceChildren();
       if (!rows.length && query && !busy) {
         const cell = document.createElement("td");
-        cell.colSpan = 5;
+        cell.colSpan = 3;
         cell.textContent = "\u672A\u67E5\u8BE2\u5230\u6743\u9650\u5DE5\u5355";
         const tr = document.createElement("tr");
         tr.append(cell);
@@ -3845,7 +3845,7 @@ ${row.node}`]) {
       }
       for (const row of rows) {
         const tr = document.createElement("tr");
-        for (const text of [row.applyNo, row.status, row.currentStep, row.submittedAt]) {
+        for (const text of [row.applyNo, row.currentStep]) {
           const td2 = document.createElement("td");
           td2.textContent = text || "-";
           tr.append(td2);

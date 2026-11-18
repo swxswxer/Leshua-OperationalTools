@@ -3,7 +3,7 @@ import type { LogHandler } from '../types';
 
 export const permissionReviewView = `<section id="syt-view-permission-review" class="view">
   <form id="permission-form"><label for="permission-query">权限工单号</label><input id="permission-query" autocomplete="off" placeholder="QX 开头的申请单号" required><button id="permission-search" class="primary" type="submit">查询权限工单</button></form>
-  <div class="permission-table-wrap"><table class="permission-table"><thead><tr><th>申请单号</th><th>状态</th><th>当前环节</th><th>提交时间</th><th>操作</th></tr></thead><tbody id="permission-rows"></tbody></table></div>
+  <div class="permission-table-wrap"><table class="permission-table"><thead><tr><th>申请单号</th><th>当前环节</th><th>操作</th></tr></thead><tbody id="permission-rows"></tbody></table></div>
   <div id="permission-status" class="status" role="status" aria-live="polite"></div>
 </section>`;
 
@@ -24,12 +24,12 @@ export function initializePermissionReview(root: HTMLElement, log: LogHandler): 
     el<HTMLButtonElement>('search').disabled = busy;
     el('rows').replaceChildren();
     if (!rows.length && query && !busy) {
-      const cell = document.createElement('td'); cell.colSpan = 5; cell.textContent = '未查询到权限工单';
+      const cell = document.createElement('td'); cell.colSpan = 3; cell.textContent = '未查询到权限工单';
       const tr = document.createElement('tr'); tr.append(cell); el('rows').append(tr);
     }
     for (const row of rows) {
       const tr = document.createElement('tr');
-      for (const text of [row.applyNo, row.status, row.currentStep, row.submittedAt]) {
+      for (const text of [row.applyNo, row.currentStep]) {
         const td = document.createElement('td'); td.textContent = text || '-'; tr.append(td);
       }
       const action = document.createElement('td');
